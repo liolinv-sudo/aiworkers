@@ -120,6 +120,10 @@ class AgentManager {
     return Array.from(this.agents.values()).map((a) => a.toJSON());
   }
 
+  getAgent(id) {
+    return this.agents.get(id) || null;
+  }
+
   // ---- Persistens (enkel JSON-fil, byt till riktig databas vid behov) ----
 
   persist() {
