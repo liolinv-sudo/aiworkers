@@ -597,11 +597,21 @@ class Agent {
       `Skriv ett kort, slagkraftigt "hook"-inlägg på svenska (max 2-3 ` +
       `meningar, gärna under 280 tecken) lämpligt att posta i Substacks ` +
       `kortformatsflöde ("Notes") för att väcka nyfikenhet och locka läsare ` +
-      `till hela texten nedan. Ingen rubrik, inga hashtags om det inte ` +
-      `känns naturligt, bara själva inlägget. Väck nyfikenhet utan att ` +
-      `avslöja allt.\n\n${summary}`;
+      `till hela texten nedan. Ingen rubrik, bara själva inlägget. Väck ` +
+      `nyfikenhet utan att avslöja allt.\n\n${summary}`;
 
-    const notesDraft = (await callGeminiText(geminiKey, prompt, 150)).trim();
+    let notesDraft = (await callGeminiText(geminiKey, prompt, 150)).trim();
+
+    // Lägg till 1-2 hashtags baserat på alstrets redan befintliga taggar -
+    // Substack använder faktiskt hashtags för upptäckbarhet i Notes-flödet.
+    if (output.tags?.length) {
+      const hashtags = output.tags
+        .slice(0, 2)
+        .map((t) => "#" + t.replace(/\s+/g, ""))
+        .join(" ");
+      notesDraft = `${notesDraft}\n\n${hashtags}`;
+    }
+
     output.notesDraft = notesDraft;
 
     this.manager.log(`${this.name} skapade ett Notes-utkast för "${output.title}".`);
