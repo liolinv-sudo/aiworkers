@@ -12,6 +12,12 @@ fetch("/api/config")
       btn.textContent = "💳 " + (cfg.paymentLabel || "Betala");
       btn.style.display = "inline-flex";
     }
+    if (cfg.substackUrl) {
+      const link = document.getElementById("subscribe-link");
+      link.href = cfg.substackUrl;
+      link.style.display = "inline-block";
+      document.getElementById("subscribe-fallback").style.display = "none";
+    }
   })
   .catch(() => {});
 
@@ -562,6 +568,7 @@ function renderLibrary() {
 }
 
 document.getElementById("open-library").addEventListener("click", openLibraryDialog);
+document.getElementById("open-subscribe").addEventListener("click", () => openModal("subscribe-dialog"));
 
 document.querySelectorAll(".lib-filter-btn").forEach((btn) => {
   btn.addEventListener("click", () => {

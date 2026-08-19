@@ -26,6 +26,7 @@
   </div>
   <a id="payment-link" class="btn btn-primary payment-btn" href="#" target="_blank" rel="noopener" style="display:none;">💳 Betala</a>
   <button class="btn btn-ghost" id="open-library">📚 Bibliotek</button>
+  <button class="btn btn-ghost" id="open-subscribe">💌 Prenumerera</button>
 </header>
 
 <main class="layout">
@@ -148,6 +149,50 @@
       <button type="button" class="lib-filter-btn" data-filter="idea">💡 Korta idéer</button>
     </div>
     <div id="library-list" class="outputs-list"></div>
+  </div>
+</div>
+
+<div id="subscribe-dialog" class="modal-overlay">
+  <div class="modal-box outputs-box subscribe-box">
+    <div class="outputs-dialog-head">
+      <h3>💌 Prenumerera</h3>
+      <button type="button" class="modal-x" data-close-modal="subscribe-dialog" aria-label="Stäng">✕</button>
+    </div>
+    <div class="subscribe-content">
+      <div class="tier-card">
+        <div class="tier-head">
+          <h4>🆓 Gratis</h4>
+        </div>
+        <p class="tier-tagline">För dig som vill testa vattnet</p>
+        <p>Få ett urval av våra texter, artiklar och krönikor rakt i inkorgen — helt gratis. Se vad vi producerar, och bestäm sedan om du vill ha mer.</p>
+      </div>
+      <div class="tier-card">
+        <div class="tier-head">
+          <h4>📖 Läsare</h4>
+          <span class="tier-price">49 kr/mån</span>
+        </div>
+        <p class="tier-tagline">Full tillgång till allt vi producerar</p>
+        <p>Alla artiklar, krönikor och e-böcker vi publicerar. Ladda ner allt som PDF, läs på engelska eller svenska, och följ hela vår produktion i realtid.</p>
+      </div>
+      <div class="tier-card tier-featured">
+        <div class="tier-head">
+          <h4>🚀 Grundare</h4>
+          <span class="tier-price">149 kr/mån</span>
+        </div>
+        <p class="tier-tagline">För dig som vill vara med från början</p>
+        <p>Allt i Läsare-nivån, plus: rösta på vilka ämnen vi ska skriva om härnäst, tidig tillgång till nya e-böcker innan de släpps till alla, och en plats i vår "grundarlogg".</p>
+      </div>
+      <div class="tier-card">
+        <div class="tier-head">
+          <h4>🏢 Företag</h4>
+          <span class="tier-price">499 kr/mån</span>
+        </div>
+        <p class="tier-tagline">För dig som vill använda innehållet kommersiellt</p>
+        <p>Allt i Grundare-nivån, plus: kommersiella rättigheter att publicera och sälja vidare vårt material, obegränsade nedladdningar i bulk, samt skräddarsydda beställningar.</p>
+      </div>
+      <a id="subscribe-link" href="#" target="_blank" rel="noopener" class="btn btn-primary subscribe-cta" style="display:none;">Gå till prenumerationssidan →</a>
+      <p id="subscribe-fallback" class="bio-note">Prenumerationslänk är inte konfigurerad än. Sätt <code>SUBSTACK_URL</code> som miljövariabel på Render.</p>
+    </div>
   </div>
 </div>
 

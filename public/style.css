@@ -807,6 +807,73 @@ button:focus-visible, input:focus-visible {
   border-color: var(--gold);
 }
 
+/* ---- Prenumerera-dialog ---- */
+
+.subscribe-box {
+  width: min(420px, 94vw);
+}
+
+.subscribe-content {
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tier-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-card);
+}
+
+.tier-featured {
+  border-color: var(--alive);
+  box-shadow: 0 0 0 1px var(--alive-glow);
+}
+
+.tier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.tier-head h4 {
+  font-family: var(--font-display);
+  font-size: 14px;
+  margin: 0;
+}
+
+.tier-price {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.tier-tagline {
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin: 0 0 8px 0;
+  font-style: italic;
+}
+
+.tier-card p:last-child {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0;
+}
+
+.subscribe-cta {
+  text-align: center;
+  text-decoration: none;
+  margin-top: 4px;
+}
+
 .source-ref {
   font-size: 10.5px;
   color: var(--ink-dim);
