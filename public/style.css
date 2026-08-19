@@ -909,6 +909,31 @@ button:focus-visible, input:focus-visible {
   border-radius: 999px;
 }
 
+.notes-draft-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px dashed var(--gold);
+  border-radius: 8px;
+}
+
+.notes-draft-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.notes-draft-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0 0 8px 0;
+  white-space: pre-wrap;
+}
+
 /* ---- Bio-dialog ---- */
 
 #bio-dialog .modal-box {

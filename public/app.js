@@ -266,6 +266,36 @@ async function translateOutput(agentId, outputId, btnEl) {
   }
 }
 
+async function generateNotesDraft(agentId, outputId, btnEl) {
+  btnEl.disabled = true;
+  btnEl.textContent = "Skapar utkast…";
+  try {
+    const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/notes-draft`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Kunde inte skapa Notes-utkast just nu.");
+      btnEl.disabled = false;
+      btnEl.textContent = "📝 Skapa Notes-utkast";
+    }
+    // Resultatet strömmar in via socket ("agent:update") när det är klart.
+  } catch (err) {
+    alert("Nätverksfel: " + err.message);
+    btnEl.disabled = false;
+    btnEl.textContent = "📝 Skapa Notes-utkast";
+  }
+}
+
+function copyToClipboard(text, btnEl) {
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      const original = btnEl.textContent;
+      btnEl.textContent = "✓ Kopierat!";
+      setTimeout(() => (btnEl.textContent = original), 1800);
+    })
+    .catch(() => alert("Kunde inte kopiera automatiskt - markera texten manuellt istället."));
+}
+
 // Binder klick-händelser för alla knappar i en behållare (agent-historik
 // ELLER det globala biblioteket) genom att slå upp agent/alster via
 // data-agent-id / data-output-id på varje knapp.
@@ -285,6 +315,12 @@ function bindOutputActions(container) {
       btn.addEventListener("click", () => expandToBook(agentId, outputId, btn));
     } else if (btn.classList.contains("btn-translate")) {
       btn.addEventListener("click", () => translateOutput(agentId, outputId, btn));
+    } else if (btn.classList.contains("btn-notes-draft")) {
+      btn.addEventListener("click", () => generateNotesDraft(agentId, outputId, btn));
+    } else if (btn.classList.contains("btn-copy-notes")) {
+      btn.addEventListener("click", () => {
+        if (output?.notesDraft) copyToClipboard(output.notesDraft, btn);
+      });
     } else if (btn.classList.contains("btn-open-agent")) {
       btn.addEventListener("click", () => {
         closeModal("library-dialog");
@@ -297,6 +333,19 @@ function bindOutputActions(container) {
 function renderTags(tags) {
   if (!tags || !tags.length) return "";
   return `<div class="tag-row">${tags.map((t) => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join("")}</div>`;
+}
+
+function renderNotesSection(o, agentId) {
+  if (o.notesDraft) {
+    return `
+      <div class="notes-draft-box">
+        <span class="notes-draft-label">📝 Notes-utkast (redo att klistra in i Substack)</span>
+        <p class="notes-draft-text">${escapeHtml(o.notesDraft)}</p>
+        <button type="button" class="btn btn-tiny btn-copy-notes" data-agent-id="${agentId}" data-output-id="${o.id}">📋 Kopiera</button>
+      </div>
+    `;
+  }
+  return `<button type="button" class="btn btn-tiny btn-notes-draft" data-agent-id="${agentId}" data-output-id="${o.id}">📝 Skapa Notes-utkast</button>`;
 }
 
 function renderOutputItem(o, agentId, showAgentName) {
@@ -354,6 +403,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           ${translateBtn}
           ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Sälj/Köp</a>` : ""}
         </div>
+        ${renderNotesSection(o, agentId)}
       </article>
     `;
   }
@@ -386,6 +436,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           ${translateBtn}
           ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
         </div>
+        ${renderNotesSection(o, agentId)}
       </article>
     `;
   }
@@ -405,6 +456,7 @@ function renderOutputItem(o, agentId, showAgentName) {
         ${translateBtn}
         ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
       </div>
+      ${renderNotesSection(o, agentId)}
     </article>
   `;
 }
