@@ -133,6 +133,27 @@ app.post("/api/agents/:id/outputs/:outputId/translate", (req, res) => {
   });
 });
 
+// Generera ett kort "Notes"-utkast (Substacks kortformatsflöde) för ett
+// alster. Inget automatisk publicering sker - Substack har ingen öppen
+// API för det. Detta ger bara ett kopierbart textutkast.
+app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
+  const agent = manager.getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: "Agent hittades inte." });
+
+  const output = agent.outputs.find((o) => o.id === req.params.outputId);
+  if (!output) return res.status(404).json({ error: "Alster hittades inte." });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(400).json({ error: "Ingen GEMINI_API_KEY satt - kan inte skapa ett Notes-utkast." });
+  }
+
+  res.json({ ok: true, started: true });
+
+  agent.generateNotesDraft(output.id).catch((err) => {
+    manager.log(`${agent.name} fick ett fel vid Notes-utkast: ${err.message}`);
+    manager.broadcastAgentUpdate(agent);
+  });
+});
+
 // Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
 // alla kapitel, illustrationsidéer (textbeskrivningar) och en sista sida
 // med föreslagna marknadsplatser.
