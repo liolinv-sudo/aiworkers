@@ -33,6 +33,7 @@ app.get("/api/config", (req, res) => {
   res.json({
     paymentLabel: process.env.PAYMENT_LABEL || null,
     paymentLink: process.env.PAYMENT_LINK || null,
+    substackUrl: process.env.SUBSTACK_URL || null,
   });
 });
 
