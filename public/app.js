@@ -46,6 +46,20 @@ function isModalOpen(id) {
   return document.getElementById(id).classList.contains("open");
 }
 
+// Visar en liten "nytt innehåll"-banner högst upp i en behållare istället
+// för att skriva över det användaren just nu läser. Klick på banner-knappen
+// kör den angivna uppdateringsfunktionen och tar bort bannern.
+function showUpdateBanner(container, onRefresh) {
+  if (container.querySelector(".update-banner")) return; // redan visad
+  const banner = document.createElement("div");
+  banner.className = "update-banner";
+  banner.innerHTML = `🔄 Nytt innehåll har tillkommit — <button type="button">visa</button>`;
+  banner.querySelector("button").addEventListener("click", () => {
+    onRefresh();
+  });
+  container.prepend(banner);
+}
+
 // Alla stäng-knappar (✕ och "Avbryt") hanteras generiskt via data-close-modal
 document.querySelectorAll("[data-close-modal]").forEach((btn) => {
   btn.addEventListener("click", () => closeModal(btn.dataset.closeModal));
@@ -98,9 +112,17 @@ function renderAgent(agent) {
   card.querySelector(".output-count").textContent = agent.outputCount ?? agent.outputs.length;
   card.querySelector(".earnings").textContent = krFromCents(agent.earningsCents) + " kr";
 
-  // Om historikvyn är öppen för just denna agent, håll den uppdaterad live
-  if (isModalOpen("outputs-dialog") && outputsTargetId === agent.id) renderOutputsList(agent);
-  if (isModalOpen("library-dialog")) renderLibrary();
+  // Om historikvyn/biblioteket är öppna, skriv INTE över det man läser -
+  // visa istället en liten banner man själv klickar på när man är redo.
+  if (isModalOpen("outputs-dialog") && outputsTargetId === agent.id) {
+    showUpdateBanner(outputsList, () => {
+      const a = agents.get(outputsTargetId);
+      if (a) renderOutputsList(a);
+    });
+  }
+  if (isModalOpen("library-dialog")) {
+    showUpdateBanner(libraryList, renderLibrary);
+  }
 
   drawLineage();
 }
@@ -321,6 +343,12 @@ function bindOutputActions(container) {
       btn.addEventListener("click", () => {
         if (output?.notesDraft) copyToClipboard(output.notesDraft, btn);
       });
+    } else if (btn.classList.contains("btn-copy-text")) {
+      btn.addEventListener("click", () => {
+        if (!output) return;
+        const full = `${output.title}\n\n${outputFullText(output)}`;
+        copyToClipboard(full, btn);
+      });
     } else if (btn.classList.contains("btn-open-agent")) {
       btn.addEventListener("click", () => {
         closeModal("library-dialog");
@@ -398,6 +426,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           ${marketplaceLinks || "<span class='bio-note'>Inga förslag</span>"}
         </div>
         <div class="output-item-actions">
+          <button type="button" class="btn btn-tiny btn-copy-text" data-agent-id="${agentId}" data-output-id="${o.id}">📋 Kopiera text</button>
           <button type="button" class="btn btn-tiny btn-download" data-agent-id="${agentId}" data-output-id="${o.id}">⬇ .txt</button>
           <a class="btn btn-tiny btn-download" href="/api/agents/${agentId}/outputs/${o.id}/pdf">⬇ .pdf</a>
           ${translateBtn}
@@ -432,6 +461,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           ${marketplaceLinks || "<span class='bio-note'>Inga förslag</span>"}
         </div>
         <div class="output-item-actions">
+          <button type="button" class="btn btn-tiny btn-copy-text" data-agent-id="${agentId}" data-output-id="${o.id}">📋 Kopiera text</button>
           <button type="button" class="btn btn-tiny btn-download" data-agent-id="${agentId}" data-output-id="${o.id}">⬇ .txt</button>
           ${translateBtn}
           ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
@@ -451,6 +481,7 @@ function renderOutputItem(o, agentId, showAgentName) {
       ${renderTags(o.tags)}
       ${hasEn ? `<p class="translated-en"><strong>EN:</strong> ${renderMarkdownLite(o.translations.en.body)}</p>` : ""}
       <div class="output-item-actions">
+        <button type="button" class="btn btn-tiny btn-copy-text" data-agent-id="${agentId}" data-output-id="${o.id}">📋 Kopiera text</button>
         <button type="button" class="btn btn-tiny btn-download" data-agent-id="${agentId}" data-output-id="${o.id}">⬇ .txt</button>
         <button type="button" class="btn btn-tiny btn-expand" data-agent-id="${agentId}" data-output-id="${o.id}">📖 Skriv fullständig bok (~30 sidor)</button>
         ${translateBtn}
@@ -597,24 +628,38 @@ function openLibraryDialog() {
 }
 
 function renderLibrary() {
-  const allItems = [];
+  const sections = [];
   for (const agent of agents.values()) {
-    for (const o of agent.outputs) {
-      allItems.push({ agentId: agent.id, output: o });
-    }
+    if (!agent.outputs.length) continue;
+    const filtered =
+      libraryFilter === "all"
+        ? agent.outputs
+        : agent.outputs.filter((o) => classifyOutput(o) === libraryFilter);
+    if (!filtered.length) continue;
+    sections.push({ agent, items: [...filtered].reverse() });
   }
-  allItems.sort((a, b) => new Date(b.output.createdAt) - new Date(a.output.createdAt));
 
-  const filtered =
-    libraryFilter === "all" ? allItems : allItems.filter((i) => classifyOutput(i.output) === libraryFilter);
-
-  if (!filtered.length) {
+  if (!sections.length) {
     libraryList.innerHTML = `<p class="outputs-empty">Inget att visa i den här kategorin ännu.</p>`;
     return;
   }
 
-  libraryList.innerHTML = filtered
-    .map((i) => renderOutputItem(i.output, i.agentId, true))
+  sections.sort((a, b) => a.agent.name.localeCompare(b.agent.name));
+
+  libraryList.innerHTML = sections
+    .map(
+      ({ agent, items }) => `
+      <details class="library-agent-section" open>
+        <summary>
+          <span class="lib-agent-name">${escapeHtml(agent.name)}</span>
+          <span class="lib-agent-count">${items.length} alster</span>
+        </summary>
+        <div class="library-agent-items">
+          ${items.map((o) => renderOutputItem(o, agent.id, false)).join("")}
+        </div>
+      </details>
+    `
+    )
     .join("");
   bindOutputActions(libraryList);
 }

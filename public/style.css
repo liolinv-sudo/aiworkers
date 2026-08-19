@@ -792,6 +792,81 @@ button:focus-visible, input:focus-visible {
   font-weight: 600;
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--alive);
+  background: rgba(110, 231, 183, 0.08);
+  border: 1px dashed var(--alive);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.update-banner button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--alive);
+  color: #06120c;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.library-agent-section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.library-agent-section summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.library-agent-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.library-agent-section summary::before {
+  content: "▸";
+  margin-right: 8px;
+  color: var(--alive);
+  transition: transform 0.15s ease;
+}
+
+.library-agent-section[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.lib-agent-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+
+.library-agent-items {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .btn-open-agent {
   font-family: var(--font-mono);
   font-size: 10px;
