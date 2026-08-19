@@ -575,6 +575,40 @@ class Agent {
     this.manager.persist();
     return output;
   }
+
+  // Genererar ett kort, "hook"-format textutkast lämpligt att posta som
+  // en Substack Note (kortformatsflödet, ungefär som en tweet) för att
+  // driva trafik till hela alstret. OBS: Substack har ingen öppen API för
+  // att posta Notes automatiskt, så detta är ett kopierbart textutkast -
+  // inte automatisk publicering.
+  async generateNotesDraft(outputId) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      throw new Error("Ingen GEMINI_API_KEY satt - kan inte skapa ett Notes-utkast.");
+    }
+    const output = this.outputs.find((o) => o.id === outputId);
+    if (!output) throw new Error("Alster hittades inte.");
+
+    const summary = output.isBook
+      ? `${output.title} - en ${output.pages || "flersidig"}-sidig e-bok. ${output.chapters?.[0]?.text?.slice(0, 200) || ""}`
+      : `${output.title} - ${output.body || output.preview}`.slice(0, 600);
+
+    const prompt =
+      `Skriv ett kort, slagkraftigt "hook"-inlägg på svenska (max 2-3 ` +
+      `meningar, gärna under 280 tecken) lämpligt att posta i Substacks ` +
+      `kortformatsflöde ("Notes") för att väcka nyfikenhet och locka läsare ` +
+      `till hela texten nedan. Ingen rubrik, inga hashtags om det inte ` +
+      `känns naturligt, bara själva inlägget. Väck nyfikenhet utan att ` +
+      `avslöja allt.\n\n${summary}`;
+
+    const notesDraft = (await callGeminiText(geminiKey, prompt, 150)).trim();
+    output.notesDraft = notesDraft;
+
+    this.manager.log(`${this.name} skapade ett Notes-utkast för "${output.title}".`);
+    this.manager.broadcastAgentUpdate(this);
+    this.manager.persist();
+    return output;
+  }
 }
 
 module.exports = Agent;
