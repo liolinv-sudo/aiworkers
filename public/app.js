@@ -395,7 +395,13 @@ function renderOutputItem(o, agentId, showAgentName) {
         (ch, i) => `
         <div class="chapter-block">
           <h5>${i + 1}. ${renderMarkdownLite(ch.title)}</h5>
-          ${ch.illustrationIdea ? `<div class="illustration-placeholder">🖼 Illustrationsidé: ${escapeHtml(ch.illustrationIdea)}</div>` : ""}
+          ${
+            ch.illustrationUrl
+              ? `<img class="chapter-illustration" src="${ch.illustrationUrl}" alt="${escapeHtml(ch.illustrationIdea || "")}" loading="lazy" />`
+              : ch.illustrationIdea
+                ? `<div class="illustration-placeholder">🖼 Illustrationsidé: ${escapeHtml(ch.illustrationIdea)}</div>`
+                : ""
+          }
           <p>${renderMarkdownLite(ch.text)}</p>
         </div>`
       )
@@ -411,6 +417,8 @@ function renderOutputItem(o, agentId, showAgentName) {
           <h4>📖 ${renderMarkdownLite(o.title)}</h4>
           <span class="output-time">${time} ${agentLabel}</span>
         </div>
+        ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
+        ${o.coverImageUrl ? `<img class="book-cover" src="${o.coverImageUrl}" alt="Omslag: ${escapeHtml(o.title)}" loading="lazy" />` : ""}
         <div class="book-meta">
           <span class="book-meta-chip">${o.pages || "?"} sidor</span>
           <span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr ?? "?"} kr</span>
@@ -448,6 +456,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           <h4>📰 ${renderMarkdownLite(o.title)}</h4>
           <span class="output-time">${time} ${agentLabel}</span>
         </div>
+        ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
         <div class="book-meta">
           ${o.articleType ? `<span class="book-meta-chip">${escapeHtml(o.articleType)}</span>` : ""}
           ${o.suggestedPriceKr ? `<span class="book-meta-chip book-price">Föreslaget arvode: ${o.suggestedPriceKr} kr</span>` : ""}
@@ -471,12 +480,33 @@ function renderOutputItem(o, agentId, showAgentName) {
     `;
   }
 
+  if (o.isImage) {
+    return `
+      <article class="output-item output-item-image">
+        <div class="output-item-head">
+          <h4>🎨 ${renderMarkdownLite(o.title)}</h4>
+          <span class="output-time">${time} ${agentLabel}</span>
+        </div>
+        ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
+        <img class="generated-image" src="${o.imageUrl}" alt="${escapeHtml(o.title)}" loading="lazy" />
+        <p>${renderMarkdownLite(o.body || o.preview)}</p>
+        ${renderTags(o.tags)}
+        <div class="output-item-actions">
+          <a class="btn btn-tiny btn-download" href="${o.imageUrl}" target="_blank" rel="noopener">⬇ Öppna bild</a>
+          <a class="btn btn-tiny btn-download" href="/api/agents/${agentId}/outputs/${o.id}/pdf">⬇ .pdf</a>
+          ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
+        </div>
+      </article>
+    `;
+  }
+
   return `
     <article class="output-item">
       <div class="output-item-head">
         <h4>${renderMarkdownLite(o.title)}</h4>
         <span class="output-time">${time} ${agentLabel}</span>
       </div>
+      ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
       <p>${renderMarkdownLite(o.body || o.preview)}</p>
       ${renderTags(o.tags)}
       ${hasEn ? `<p class="translated-en"><strong>EN:</strong> ${renderMarkdownLite(o.translations.en.body)}</p>` : ""}
@@ -619,6 +649,7 @@ let libraryFilter = "all";
 function classifyOutput(o) {
   if (o.isBook) return "book";
   if (o.isArticle) return "article";
+  if (o.isImage) return "image";
   return "idea";
 }
 
