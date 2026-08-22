@@ -157,7 +157,21 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
 // Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
 // alla kapitel, illustrationsidéer (textbeskrivningar) och en sista sida
 // med föreslagna marknadsplatser.
-app.get("/api/agents/:id/outputs/:outputId/pdf", (req, res) => {
+// Hämtar en bild från en URL som en Buffer, för inbäddning i PDF:er.
+// Om hämtningen misslyckas (t.ex. Pollinations tillfälligt nere) hoppar
+// vi bara över bilden istället för att låta hela PDF-genereringen krascha.
+async function fetchImageBuffer(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const arrayBuffer = await resp.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    return null;
+  }
+}
+
+app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
   const agent = manager.getAgent(req.params.id);
   if (!agent) return res.status(404).send("Agent hittades inte.");
 
@@ -182,8 +196,24 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", (req, res) => {
   const doc = new PDFDocument({ margin: 56 });
   doc.pipe(res);
 
-  // Omslagssida
+  // Omslagssida (med riktig omslagsbild om boken har en)
+  if (output.isBook && output.coverImageUrl) {
+    const coverBuffer = await fetchImageBuffer(output.coverImageUrl);
+    if (coverBuffer) {
+      try {
+        doc.image(coverBuffer, { fit: [280, 420], align: "center" });
+        doc.moveDown();
+      } catch (err) {
+        // Ogiltig bilddata - hoppa bara över, fortsätt med text
+      }
+    }
+  }
   doc.fontSize(24).text(title, { align: "center" });
+  if (output.subtitle) {
+    doc.moveDown(0.3);
+    doc.fontSize(13).fillColor("#555").text(output.subtitle, { align: "center" });
+    doc.fillColor("black");
+  }
   doc.moveDown();
   doc.fontSize(11).fillColor("#555").text(`Skapad av ${agent.name}`, { align: "center" });
   if (output.isBook) {
@@ -197,11 +227,23 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", (req, res) => {
   doc.fillColor("black");
 
   if (output.isBook && chapters?.length) {
-    chapters.forEach((ch, i) => {
+    for (let i = 0; i < chapters.length; i++) {
+      const ch = chapters[i];
       doc.addPage();
       doc.fontSize(17).text(`${i + 1}. ${ch.title}`);
       doc.moveDown();
-      if (ch.illustrationIdea) {
+
+      if (ch.illustrationUrl) {
+        const illBuffer = await fetchImageBuffer(ch.illustrationUrl);
+        if (illBuffer) {
+          try {
+            doc.image(illBuffer, { fit: [460, 280], align: "center" });
+            doc.moveDown();
+          } catch (err) {
+            // Hoppa över om bilddatan var ogiltig
+          }
+        }
+      } else if (ch.illustrationIdea) {
         doc
           .fontSize(9)
           .fillColor("#888")
@@ -210,7 +252,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", (req, res) => {
         doc.moveDown();
       }
       doc.fontSize(11).text(ch.text, { align: "left", lineGap: 3 });
-    });
+    }
 
     doc.addPage();
     doc.fontSize(15).text(useEn ? "Suggested marketplaces" : "Föreslagna marknadsplatser");
@@ -220,6 +262,18 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", (req, res) => {
       doc.moveDown(0.3);
     });
     doc.fillColor("black");
+  } else if (output.isImage && output.imageUrl) {
+    const imgBuffer = await fetchImageBuffer(output.imageUrl);
+    doc.addPage();
+    if (imgBuffer) {
+      try {
+        doc.image(imgBuffer, { fit: [460, 460], align: "center" });
+        doc.moveDown();
+      } catch (err) {
+        // Hoppa över om bilddatan var ogiltig
+      }
+    }
+    doc.fontSize(11).text(bodyText, { lineGap: 3 });
   } else {
     doc.addPage();
     doc.fontSize(11).text(bodyText, { lineGap: 3 });
