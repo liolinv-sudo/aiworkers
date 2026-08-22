@@ -949,6 +949,63 @@ button:focus-visible, input:focus-visible {
   margin-top: 4px;
 }
 
+/* ---- Marknadsinsikter-dialog ---- */
+
+.market-box {
+  width: min(480px, 94vw);
+}
+
+.market-content {
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.market-disclaimer {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--gold);
+  background: rgba(245, 185, 92, 0.08);
+  border: 1px dashed var(--gold);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.market-section {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.market-section:last-child {
+  border-bottom: none;
+}
+
+.market-section h4 {
+  font-family: var(--font-display);
+  font-size: 13px;
+  margin: 0 0 6px 0;
+}
+
+.market-section p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  margin: 0 0 4px 0;
+  color: var(--ink);
+}
+
+.market-section strong {
+  color: var(--alive);
+}
+
+.market-note {
+  font-size: 11px !important;
+  color: var(--ink-dim) !important;
+}
+
 .source-ref {
   font-size: 10.5px;
   color: var(--ink-dim);

@@ -27,6 +27,7 @@
   <a id="payment-link" class="btn btn-primary payment-btn" href="#" target="_blank" rel="noopener" style="display:none;">💳 Betala</a>
   <button class="btn btn-ghost" id="open-library">📚 Bibliotek</button>
   <button class="btn btn-ghost" id="open-subscribe">💌 Prenumerera</button>
+  <button class="btn btn-ghost" id="open-market">📊 Marknadsinsikter</button>
 </header>
 
 <main class="layout">
@@ -193,6 +194,50 @@
       </div>
       <a id="subscribe-link" href="#" target="_blank" rel="noopener" class="btn btn-primary subscribe-cta" style="display:none;">Gå till prenumerationssidan →</a>
       <p id="subscribe-fallback" class="bio-note">Prenumerationslänk är inte konfigurerad än. Sätt <code>SUBSTACK_URL</code> som miljövariabel på Render.</p>
+    </div>
+  </div>
+</div>
+
+<div id="market-dialog" class="modal-overlay">
+  <div class="modal-box outputs-box market-box">
+    <div class="outputs-dialog-head">
+      <h3>📊 Marknadsinsikter</h3>
+      <button type="button" class="modal-x" data-close-modal="market-dialog" aria-label="Stäng">✕</button>
+    </div>
+    <div class="market-content">
+      <p class="market-disclaimer">
+        ⚠️ Detta är en <strong>statisk ögonblicksbild</strong> från research gjord augusti 2026, inte levande marknadsdata.
+        Appen kan inte söka på webben själv, så siffrorna uppdateras bara när du ber om en ny genomgång i chatten.
+        Se det som en rimlig utgångspunkt, inte en garanti.
+      </p>
+
+      <div class="market-section">
+        <h4>📖 Korta e-böcker (under 30 sidor)</h4>
+        <p>Vanligt prisspann: <strong>50-70 kr</strong> (ca 5-7 USD)</p>
+        <p class="market-note">Amazon KDP håller sig ofta lägst: 50-85 kr (4,99-7,99 USD) för facklitteratur.</p>
+      </div>
+
+      <div class="market-section">
+        <h4>📖 Fullängdsguider (~30 sidor)</h4>
+        <p>Vanligt prisspann: <strong>95-160 kr</strong> (ca 9-15 USD)</p>
+        <p class="market-note">Gumroads vanligaste prispunkter för hela plattformen ligger kring 200-300 kr (19-29 USD) - särskilt för mer etablerade skapare.</p>
+      </div>
+
+      <div class="market-section">
+        <h4>📰 Frilansartiklar (obearbetade AI-utkast)</h4>
+        <p>Nybörjar-/mellannivå: <strong>0,5-1,5 kr/ord</strong></p>
+        <p class="market-note">Professionella mänskliga skribenter tar ofta 1-3 kr/ord - men det förutsätter mänsklig research, redigering och faktagranskning som AI-utkast saknar.</p>
+      </div>
+
+      <div class="market-section">
+        <h4>🌍 Svenska vs. utländska köpare</h4>
+        <p class="market-note">Internationella plattformar (Gumroad, Etsy, Substack) har generellt högre betalningsvilja i USD/EUR än en motsvarande svensk nischpublik i SEK - men kräver engelskspråkigt innehåll (se "Översätt till engelska"-knappen) och konkurrerar med en mycket större marknad.</p>
+      </div>
+
+      <div class="market-section">
+        <h4>Källor</h4>
+        <p class="market-note">Baserat på webbresearch om Gumroad-, Etsy-, Amazon KDP- och frilansmarknadens prissättning, sammanställd i denna konversation augusti 2026.</p>
+      </div>
     </div>
   </div>
 </div>

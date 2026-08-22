@@ -697,6 +697,7 @@ function renderLibrary() {
 
 document.getElementById("open-library").addEventListener("click", openLibraryDialog);
 document.getElementById("open-subscribe").addEventListener("click", () => openModal("subscribe-dialog"));
+document.getElementById("open-market").addEventListener("click", () => openModal("market-dialog"));
 
 document.querySelectorAll(".lib-filter-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
