@@ -231,6 +231,14 @@ function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
 }
 
+// Grov tumregel för bildpris, baserad på vanlig prissättning för digital
+// konst på Etsy (8-15 dollar/72-160 kr för en "quality print"; 2-3 dollar
+// signalerar enligt säljarguider "disposability"). Sätts i den nedre delen
+// eftersom det är AI-genererat utan mänsklig efterbearbetning/kuration.
+function estimateImagePriceKr() {
+  return 59;
+}
+
 const IMAGE_IDEA_FALLBACKS = [
   "en ensam fyr vid havet i skymningsljus, akvarellstil",
   "ett frodigt regnskogslandskap sett uppifrån, varma gröna toner",
@@ -401,6 +409,8 @@ class Agent {
         tags,
         isImage: true,
         imageUrl,
+        suggestedPriceKr: estimateImagePriceKr(),
+        marketplaces: MARKETPLACES.image,
         createdAt: new Date().toISOString(),
       };
     }
