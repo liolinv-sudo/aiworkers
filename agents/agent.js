@@ -228,7 +228,7 @@ function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
     seed = (seed * 31 + prompt.charCodeAt(i)) >>> 0;
   }
   const encoded = encodeURIComponent(prompt.slice(0, 400));
-  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&referrer=agentkolonin.app`;
 }
 
 // Grov tumregel för bildpris, baserad på vanlig prissättning för digital
@@ -570,9 +570,13 @@ class Agent {
       const illMatch = chapterRaw.match(/ILLUSTRATION:\s*(.+)/i);
       const illustrationIdea = illMatch ? illMatch[1].trim() : null;
       const text = chapterRaw.replace(/ILLUSTRATION:.*$/is, "").trim();
-      const illustrationUrl = illustrationIdea
-        ? buildImageUrl(illustrationIdea, { width: 900, height: 560 })
-        : null;
+      // Bara var tredje kapitel får en riktig bild (istället för alla 10) -
+      // annars laddas för många Pollinations-bilder samtidigt och nekas av
+      // deras hastighetsgräns (1 anrop/15 sek för anonyma anrop).
+      const illustrationUrl =
+        illustrationIdea && i % 3 === 0
+          ? buildImageUrl(illustrationIdea, { width: 900, height: 560 })
+          : null;
       chapters.push({ title: chapterTitles[i], text, illustrationIdea, illustrationUrl });
     }
 
