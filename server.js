@@ -154,12 +154,10 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
   });
 });
 
-// Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
-// alla kapitel, illustrationsidéer (textbeskrivningar) och en sista sida
-// med föreslagna marknadsplatser.
 // Hämtar en bild från en URL som en Buffer, för inbäddning i PDF:er.
-// Om hämtningen misslyckas (t.ex. Pollinations tillfälligt nere) hoppar
-// vi bara över bilden istället för att låta hela PDF-genereringen krascha.
+// Om hämtningen misslyckas (t.ex. Pollinations tillfälligt nere, eller
+// hastighetsgränsen nåddes) hoppar vi bara över bilden istället för att
+// låta hela PDF-genereringen krascha.
 async function fetchImageBuffer(url) {
   try {
     const resp = await fetch(url);
@@ -171,6 +169,25 @@ async function fetchImageBuffer(url) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Pollinations tillåter bara ett anonymt bildanrop var 15:e sekund. Den
+// här hjälparen håller koll på om det är första hämtningen i den aktuella
+// PDF-genereringen, och väntar annars in gränsen innan nästa anrop.
+function makeThrottledImageFetcher() {
+  let hasFetchedOnce = false;
+  return async function throttledFetch(url) {
+    if (hasFetchedOnce) await sleep(16000);
+    hasFetchedOnce = true;
+    return fetchImageBuffer(url);
+  };
+}
+
+// Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
+// alla kapitel, riktiga illustrationer (där de finns) och en sista sida
+// med föreslagna marknadsplatser.
 app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
   const agent = manager.getAgent(req.params.id);
   if (!agent) return res.status(404).send("Agent hittades inte.");
@@ -195,10 +212,11 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
 
   const doc = new PDFDocument({ margin: 56 });
   doc.pipe(res);
+  const fetchImage = makeThrottledImageFetcher();
 
   // Omslagssida (med riktig omslagsbild om boken har en)
   if (output.isBook && output.coverImageUrl) {
-    const coverBuffer = await fetchImageBuffer(output.coverImageUrl);
+    const coverBuffer = await fetchImage(output.coverImageUrl);
     if (coverBuffer) {
       try {
         doc.image(coverBuffer, { fit: [280, 420], align: "center" });
@@ -234,7 +252,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
       doc.moveDown();
 
       if (ch.illustrationUrl) {
-        const illBuffer = await fetchImageBuffer(ch.illustrationUrl);
+        const illBuffer = await fetchImage(ch.illustrationUrl);
         if (illBuffer) {
           try {
             doc.image(illBuffer, { fit: [460, 280], align: "center" });
@@ -263,7 +281,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
     });
     doc.fillColor("black");
   } else if (output.isImage && output.imageUrl) {
-    const imgBuffer = await fetchImageBuffer(output.imageUrl);
+    const imgBuffer = await fetchImage(output.imageUrl);
     doc.addPage();
     if (imgBuffer) {
       try {
