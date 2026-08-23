@@ -227,6 +227,9 @@ function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
   for (let i = 0; i < prompt.length; i++) {
     seed = (seed * 31 + prompt.charCodeAt(i)) >>> 0;
   }
+  // Pollinations backend kräver seed <= 2147483647 (max signat 32-bitstal).
+  // Maska bort högsta biten så vi aldrig hamnar över den gränsen.
+  seed = seed & 0x7fffffff;
   const encoded = encodeURIComponent(prompt.slice(0, 400));
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&referrer=agentkolonin.app`;
 }

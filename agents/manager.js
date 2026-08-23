@@ -133,6 +133,9 @@ class AgentManager {
         dayStartedAt: this.dayStartedAt,
         agents: this.getAllAgentsJSON(),
       };
+      // Git spårar inte tomma mappar, så "data"-mappen kan saknas efter en
+      // färsk klon (t.ex. på Render) - skapa den om den inte redan finns.
+      fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
       fs.writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2));
     } catch (err) {
       console.error("Kunde inte spara state:", err.message);
