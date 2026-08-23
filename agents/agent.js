@@ -196,20 +196,51 @@ function estimateArticlePriceKr(wordCount) {
   return Math.max(99, Math.min(699, raw));
 }
 
-// Extraherar en "TAGGAR: tag1, tag2, tag3"-rad ur en Gemini-respons och
-// returnerar {tags, cleanedText} där taggraden är borttagen från texten.
+// Extraherar "TAGGAR: ..." och "UNDERRUBRIK: ..." rader ur en Gemini-
+// respons och returnerar {tags, subtitle, cleanedText} där båda raderna
+// är borttagna från texten.
 function extractTags(rawText) {
-  const match = rawText.match(/TAGGAR:\s*(.+)/i);
-  const tags = match
-    ? match[1]
+  const tagMatch = rawText.match(/TAGGAR:\s*(.+)/i);
+  const tags = tagMatch
+    ? tagMatch[1]
         .split(",")
         .map((t) => t.trim().replace(/^#/, ""))
         .filter(Boolean)
         .slice(0, 5)
     : [];
-  const cleanedText = rawText.replace(/TAGGAR:.*$/is, "").trim();
-  return { tags, cleanedText };
+  const subMatch = rawText.match(/UNDERRUBRIK:\s*(.+)/i);
+  const subtitle = subMatch ? subMatch[1].trim() : "";
+  const cleanedText = rawText
+    .replace(/TAGGAR:.*$/im, "")
+    .replace(/UNDERRUBRIK:.*$/im, "")
+    .trim();
+  return { tags, subtitle, cleanedText };
 }
+
+// Bygger en URL till Pollinations.ai:s genuint gratis, nyckellösa
+// bildgenererings-API. Ingen server-side anrop behövs - detta ÄR bilden,
+// webbläsaren/PDF:en hämtar den direkt från URL:en.
+function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
+  // Enkel, stabil "seed" baserad på prompten så samma idé alltid ger
+  // samma bild (istället för en ny slumpmässig bild varje gång URL:en nås).
+  let seed = 0;
+  for (let i = 0; i < prompt.length; i++) {
+    seed = (seed * 31 + prompt.charCodeAt(i)) >>> 0;
+  }
+  const encoded = encodeURIComponent(prompt.slice(0, 400));
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+}
+
+const IMAGE_IDEA_FALLBACKS = [
+  "en ensam fyr vid havet i skymningsljus, akvarellstil",
+  "ett frodigt regnskogslandskap sett uppifrån, varma gröna toner",
+  "ett futuristiskt stadslandskap i neonljus på natten",
+  "en katt som sitter i ett regnigt fönster, mjukt ljus",
+  "abstrakt geometrisk konst i varma solnedgångsfärger",
+  "ett stilleben med frukt och blommor i klassisk oljemålningsstil",
+  "ett minimalistiskt bergslandskap i pastellfärger",
+  "en gammal bokhandel fylld med böcker, varmt ljus",
+];
 
 class Agent {
   constructor({ parentId = null, manager, kind = "text" }) {
@@ -293,17 +324,20 @@ class Agent {
           "Ge mig en kort, säljbar produktidé (t.ex. en novell-pitch, " +
           "ett blogginlägg, eller copywriting-exempel) som skulle kunna " +
           "säljas online. Svara med en titel på första raden och en kort " +
-          "beskrivning (max 3 meningar) på raderna efter. Avsluta därefter " +
-          "med en ny rad som börjar med 'TAGGAR:' följt av 3-5 relevanta " +
-          "svenska sökord/ämnesord separerade med kommatecken.";
+          "beskrivning (max 3 meningar) på raderna efter. Lägg också till " +
+          "en rad som börjar med 'UNDERRUBRIK:' följt av en kort, säljande " +
+          "underrubrik (max 12 ord), och en rad som börjar med 'TAGGAR:' " +
+          "följt av 3-5 relevanta svenska sökord/ämnesord separerade med " +
+          "kommatecken.";
 
-        const raw = await callGeminiText(geminiKey, prompt, 350);
-        const { tags, cleanedText } = extractTags(raw);
+        const raw = await callGeminiText(geminiKey, prompt, 380);
+        const { tags, subtitle, cleanedText } = extractTags(raw);
         const [firstLine, ...rest] = cleanedText.split("\n").filter(Boolean);
         const bodyText = rest.join("\n").trim();
         return {
           id: nanoid(6),
           title: firstLine || "Namnlöst verk",
+          subtitle,
           preview: bodyText.slice(0, 280),
           body: bodyText || firstLine,
           tags,
@@ -326,17 +360,47 @@ class Agent {
     }
 
     if (this.kind === "image") {
-      // TODO: koppla in en bildgenereringstjänst här, t.ex. Stability AI
-      // eller annan leverantör. Returnera en URL eller base64-bild i preview.
+      let title, description, tags, subtitle;
+
+      if (geminiKey) {
+        const prompt =
+          "Ge en kort, kreativ bildidé (t.ex. till ett bokomslag, ett " +
+          "konsttryck, eller en illustration) som skulle kunna säljas " +
+          "online. Svara med en titel på första raden och en kort visuell " +
+          "beskrivning (max 2 meningar - beskriv motiv, stil och färger, " +
+          "på engelska för bästa resultat i en bildgenerator) på raden " +
+          "efter. Lägg också till en rad som börjar med 'UNDERRUBRIK:' " +
+          "följt av en kort svensk underrubrik (max 12 ord), och en rad " +
+          "som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord " +
+          "separerade med kommatecken.";
+
+        const raw = await callGeminiText(geminiKey, prompt, 250);
+        const extracted = extractTags(raw);
+        tags = extracted.tags;
+        subtitle = extracted.subtitle;
+        const [firstLine, ...rest] = extracted.cleanedText.split("\n").filter(Boolean);
+        title = firstLine || "Namnlös bildidé";
+        description = rest.join(" ").trim() || firstLine;
+      } else {
+        // Pollinations kräver ingen nyckel alls, så bildagenten fungerar
+        // även helt utan GEMINI_API_KEY - bara med enklare, förvalda idéer.
+        description = pick(IMAGE_IDEA_FALLBACKS);
+        title = `Bildidé #${this.cyclesRun + 1} av ${this.name}`;
+        tags = [];
+        subtitle = "";
+      }
+
+      const imageUrl = buildImageUrl(description);
+
       return {
         id: nanoid(6),
-        title: `Bildidé #${this.cyclesRun + 1} av ${this.name}`,
-        preview:
-          "(Demo-läge: ingen bild-API kopplad än. Lägg till din leverantör " +
-          "i agents/agent.js -> generateContent().)",
-        body:
-          "(Demo-läge: ingen bild-API kopplad än. Lägg till din leverantör " +
-          "i agents/agent.js -> generateContent().)",
+        title,
+        subtitle,
+        preview: description.slice(0, 280),
+        body: description,
+        tags,
+        isImage: true,
+        imageUrl,
         createdAt: new Date().toISOString(),
       };
     }
@@ -348,8 +412,10 @@ class Agent {
 
         let prompt;
         const tagInstruction =
-          " Avsluta därefter med en ny rad som börjar med 'TAGGAR:' följt " +
-          "av 3-5 relevanta svenska sökord/ämnesord separerade med kommatecken.";
+          " Lägg också till en rad som börjar med 'UNDERRUBRIK:' följt av " +
+          "en kort, slagkraftig underrubrik (max 12 ord), och en ny rad " +
+          "som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord/" +
+          "ämnesord separerade med kommatecken.";
 
         if (realSource) {
           prompt = isColumn
@@ -399,7 +465,7 @@ class Agent {
         }
 
         const raw = await callGeminiText(geminiKey, prompt, 1850);
-        const { tags, cleanedText } = extractTags(raw);
+        const { tags, subtitle, cleanedText } = extractTags(raw);
         const [firstLine, ...rest] = cleanedText.split("\n").filter(Boolean);
         const bodyText = rest.join("\n").trim();
         const wordCount = bodyText.split(/\s+/).filter(Boolean).length;
@@ -407,6 +473,7 @@ class Agent {
         return {
           id: nanoid(6),
           title: firstLine || "Namnlös artikel",
+          subtitle,
           preview: bodyText.slice(0, 280),
           body: bodyText || firstLine,
           tags,
@@ -459,11 +526,13 @@ class Agent {
       `denna idé:\n\nTitel: ${output.title}\nBeskrivning: ${output.body || output.preview}\n\n` +
       `Ge exakt ${CHAPTER_COUNT} kapitelrubriker på svenska, en per rad, ` +
       `utan numrering eller extra text - bara rubrikerna. Lägg därefter ` +
-      `till en sista rad som börjar med 'TAGGAR:' följt av 3-5 relevanta ` +
-      `svenska sökord/ämnesord separerade med kommatecken.`;
+      `till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, ` +
+      `säljande underrubrik till boken (max 12 ord), och en sista rad som ` +
+      `börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord/ämnesord ` +
+      `separerade med kommatecken.`;
 
-    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 350);
-    const { tags: bookTags, cleanedText: outlineText } = extractTags(outlineRaw);
+    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 380);
+    const { tags: bookTags, subtitle: bookSubtitle, cleanedText: outlineText } = extractTags(outlineRaw);
     const chapterTitles = outlineText
       .split("\n")
       .map((l) => l.replace(/^[\d.\-\s]+/, "").trim())
@@ -484,14 +553,21 @@ class Agent {
         `e-boken "${output.title}". Skriv ca 500-700 ord sammanhängande ` +
         `brödtext på svenska, inga underrubriker inuti texten. Avsluta ` +
         `därefter med en ny rad som börjar med "ILLUSTRATION:" följt av en ` +
-        `kort beskrivning (max 15 ord) av en passande illustration till kapitlet.`;
+        `kort visuell beskrivning (max 15 ord, gärna på engelska för bästa ` +
+        `resultat i en bildgenerator) av en passande illustration till kapitlet.`;
 
       const chapterRaw = await callGeminiText(geminiKey, chapterPrompt, 900);
       const illMatch = chapterRaw.match(/ILLUSTRATION:\s*(.+)/i);
       const illustrationIdea = illMatch ? illMatch[1].trim() : null;
       const text = chapterRaw.replace(/ILLUSTRATION:.*$/is, "").trim();
-      chapters.push({ title: chapterTitles[i], text, illustrationIdea });
+      const illustrationUrl = illustrationIdea
+        ? buildImageUrl(illustrationIdea, { width: 900, height: 560 })
+        : null;
+      chapters.push({ title: chapterTitles[i], text, illustrationIdea, illustrationUrl });
     }
+
+    const coverPrompt = `book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
+    const coverImageUrl = buildImageUrl(coverPrompt, { width: 800, height: 1200 });
 
     const totalWords = chapters.reduce(
       (sum, c) => sum + c.text.split(/\s+/).filter(Boolean).length,
@@ -501,6 +577,8 @@ class Agent {
 
     output.isBook = true;
     output.chapters = chapters;
+    output.coverImageUrl = coverImageUrl;
+    output.subtitle = bookSubtitle || output.subtitle;
     output.pages = pages;
     output.suggestedPriceKr = price;
     output.marketplaces = MARKETPLACES[this.kind] || MARKETPLACES.text;
