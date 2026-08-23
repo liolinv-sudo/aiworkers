@@ -481,6 +481,10 @@ function renderOutputItem(o, agentId, showAgentName) {
   }
 
   if (o.isImage) {
+    const marketplaceLinks = (o.marketplaces || [])
+      .map((m) => `<a href="${m.url}" target="_blank" rel="noopener" class="marketplace-chip">${escapeHtml(m.name)}</a>`)
+      .join("");
+
     return `
       <article class="output-item output-item-image">
         <div class="output-item-head">
@@ -489,8 +493,15 @@ function renderOutputItem(o, agentId, showAgentName) {
         </div>
         ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
         <img class="generated-image" src="${o.imageUrl}" alt="${escapeHtml(o.title)}" loading="lazy" />
+        <div class="book-meta">
+          ${o.suggestedPriceKr ? `<span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr} kr</span>` : ""}
+        </div>
         <p>${renderMarkdownLite(o.body || o.preview)}</p>
         ${renderTags(o.tags)}
+        <div class="marketplace-row">
+          <span class="marketplace-label">Lämpliga marknader:</span>
+          ${marketplaceLinks || "<span class='bio-note'>Inga förslag</span>"}
+        </div>
         <div class="output-item-actions">
           <a class="btn btn-tiny btn-download" href="${o.imageUrl}" target="_blank" rel="noopener">⬇ Öppna bild</a>
           <a class="btn btn-tiny btn-download" href="/api/agents/${agentId}/outputs/${o.id}/pdf">⬇ .pdf</a>
