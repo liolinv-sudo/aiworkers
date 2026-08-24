@@ -154,11 +154,10 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
   });
 });
 
-// Hämtar en bild från en URL som en Buffer, för inbäddning i PDF:er.
-// Om hämtningen misslyckas (t.ex. Pollinations tillfälligt nere, eller
-// hastighetsgränsen nåddes) hoppar vi bara över bilden istället för att
-// låta hela PDF-genereringen krascha.
-async function fetchImageBuffer(url) {
+// Hämtar en bild live som fallback, ENDAST för äldre alster skapade innan
+// bilder cachades som base64 vid skapandetillfället. Nya alster behöver
+// aldrig detta - deras bilder finns redan sparade som base64.
+async function fetchImageBufferFallback(url) {
   try {
     const resp = await fetch(url);
     if (!resp.ok) return null;
@@ -169,25 +168,19 @@ async function fetchImageBuffer(url) {
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Pollinations tillåter bara ett anonymt bildanrop var 15:e sekund. Den
-// här hjälparen håller koll på om det är första hämtningen i den aktuella
-// PDF-genereringen, och väntar annars in gränsen innan nästa anrop.
-function makeThrottledImageFetcher() {
-  let hasFetchedOnce = false;
-  return async function throttledFetch(url) {
-    if (hasFetchedOnce) await sleep(16000);
-    hasFetchedOnce = true;
-    return fetchImageBuffer(url);
-  };
+// Slår upp en bild för ett objekt som antingen har cachad base64-data
+// (nya alster - snabbt och pålitligt) eller bara en URL (äldre alster -
+// försöker hämta live, men misslyckas tyst om det inte går).
+async function resolveImageBuffer(base64, url) {
+  if (base64) return Buffer.from(base64, "base64");
+  if (url) return fetchImageBufferFallback(url);
+  return null;
 }
 
 // Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
 // alla kapitel, riktiga illustrationer (där de finns) och en sista sida
-// med föreslagna marknadsplatser.
+// med föreslagna marknadsplatser. Bilder hämtas från cachad base64-data
+// (sparad när alstret skapades), så nedladdningen är omedelbar.
 app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
   const agent = manager.getAgent(req.params.id);
   if (!agent) return res.status(404).send("Agent hittades inte.");
@@ -212,20 +205,21 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
 
   const doc = new PDFDocument({ margin: 56 });
   doc.pipe(res);
-  const fetchImage = makeThrottledImageFetcher();
 
-  // Omslagssida (med riktig omslagsbild om boken har en)
-  if (output.isBook && output.coverImageUrl) {
-    const coverBuffer = await fetchImage(output.coverImageUrl);
+  // Omslagssida - HELT EGEN sida, så bilden aldrig kan skymma titeltexten.
+  if (output.isBook && (output.coverImageBase64 || output.coverImageUrl)) {
+    const coverBuffer = await resolveImageBuffer(output.coverImageBase64, output.coverImageUrl);
     if (coverBuffer) {
       try {
-        doc.image(coverBuffer, { fit: [280, 420], align: "center" });
-        doc.moveDown();
+        doc.image(coverBuffer, 56, 56, { fit: [483, 680], align: "center", valign: "center" });
       } catch (err) {
-        // Ogiltig bilddata - hoppa bara över, fortsätt med text
+        // Ogiltig bilddata - hoppa bara över omslagssidan
       }
     }
   }
+
+  // Titelsida - alltid en egen sida, aldrig delad med omslagsbilden.
+  doc.addPage();
   doc.fontSize(24).text(title, { align: "center" });
   if (output.subtitle) {
     doc.moveDown(0.3);
@@ -251,8 +245,8 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
       doc.fontSize(17).text(`${i + 1}. ${ch.title}`);
       doc.moveDown();
 
-      if (ch.illustrationUrl) {
-        const illBuffer = await fetchImage(ch.illustrationUrl);
+      if (ch.illustrationBase64 || ch.illustrationUrl) {
+        const illBuffer = await resolveImageBuffer(ch.illustrationBase64, ch.illustrationUrl);
         if (illBuffer) {
           try {
             doc.image(illBuffer, { fit: [460, 280], align: "center" });
@@ -260,6 +254,13 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
           } catch (err) {
             // Hoppa över om bilddatan var ogiltig
           }
+        } else if (ch.illustrationIdea) {
+          doc
+            .fontSize(9)
+            .fillColor("#888")
+            .text(`[Illustration: ${ch.illustrationIdea}]`);
+          doc.fillColor("black");
+          doc.moveDown();
         }
       } else if (ch.illustrationIdea) {
         doc
@@ -280,8 +281,8 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
       doc.moveDown(0.3);
     });
     doc.fillColor("black");
-  } else if (output.isImage && output.imageUrl) {
-    const imgBuffer = await fetchImage(output.imageUrl);
+  } else if (output.isImage && (output.imageBase64 || output.imageUrl)) {
+    const imgBuffer = await resolveImageBuffer(output.imageBase64, output.imageUrl);
     doc.addPage();
     if (imgBuffer) {
       try {
@@ -308,10 +309,18 @@ io.on("connection", (socket) => {
   socket.emit("logs:init", manager.logs.slice(-50));
 });
 
-// Starta med en agent igång som standard
-manager.spawnAgent({ kind: "text" });
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`AI Agent Farm körs på port ${PORT}`);
-});
+
+// Försök återställa tidigare agenter och deras alster (från Upstash om
+// konfigurerat, annars lokal fil) INNAN servern börjar ta emot trafik.
+// Skapa bara en ny standardagent om inget fanns att återställa.
+(async () => {
+  const restored = await manager.loadState();
+  if (!restored) {
+    manager.spawnAgent({ kind: "text" });
+  }
+
+  server.listen(PORT, () => {
+    console.log(`AI Agent Farm körs på port ${PORT}`);
+  });
+})();
