@@ -6,6 +6,15 @@ const STATE_FILE = path.join(__dirname, "..", "data", "state.json");
 const MAX_AGENTS = 20; // skydd mot skenande kostnader/oändlig förökning
 const DAILY_GOAL_CENTS = 20000; // 200 kr i öre
 
+// Render "free"-tjänster har ett "ephemeral filesystem" - lokala filer
+// försvinner vid varje omstart, deploy, ELLER efter 15 minuters inaktivitet
+// (då tjänsten "spinner ner"). En lokal state.json överlever därför aldrig
+// där. Upstash Redis (gratis, inget kreditkort) används istället när den
+// är konfigurerad - lokal fil används bara som fallback för lokal utveckling.
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const REDIS_KEY = "agentkolonin:state";
+
 class AgentManager {
   constructor(io) {
     this.io = io;
@@ -124,22 +133,82 @@ class AgentManager {
     return this.agents.get(id) || null;
   }
 
-  // ---- Persistens (enkel JSON-fil, byt till riktig databas vid behov) ----
+  // ---- Persistens ----
+  // Sparar till Upstash Redis (gratis, överlever Render-omstarter) om
+  // konfigurerat, annars faller tillbaka på en lokal fil (fungerar bara
+  // för lokal utveckling - inte pålitligt på Render utan Upstash).
 
-  persist() {
-    try {
-      const snapshot = {
-        savedAt: new Date().toISOString(),
-        dayStartedAt: this.dayStartedAt,
-        agents: this.getAllAgentsJSON(),
-      };
-      // Git spårar inte tomma mappar, så "data"-mappen kan saknas efter en
-      // färsk klon (t.ex. på Render) - skapa den om den inte redan finns.
-      fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-      fs.writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2));
-    } catch (err) {
-      console.error("Kunde inte spara state:", err.message);
+  async persist() {
+    const snapshot = {
+      savedAt: new Date().toISOString(),
+      dayStartedAt: this.dayStartedAt,
+      agents: this.getAllAgentsJSON(),
+    };
+    const json = JSON.stringify(snapshot);
+
+    if (REDIS_URL && REDIS_TOKEN) {
+      try {
+        await fetch(`${REDIS_URL}/set/${REDIS_KEY}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${REDIS_TOKEN}`,
+            "Content-Type": "text/plain",
+          },
+          body: json,
+        });
+        return;
+      } catch (err) {
+        console.error("Kunde inte spara till Upstash:", err.message);
+        // Fortsätt till fil-fallbacken nedan istället för att ge upp helt
+      }
     }
+
+    try {
+      fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+      fs.writeFileSync(STATE_FILE, json);
+    } catch (err) {
+      console.error("Kunde inte spara state lokalt:", err.message);
+    }
+  }
+
+  // Läser tillbaka tidigare sparade agenter och deras alster. Anropas en
+  // gång vid serverstart. Returnerar true om något återställdes.
+  async loadState() {
+    let snapshot = null;
+
+    if (REDIS_URL && REDIS_TOKEN) {
+      try {
+        const resp = await fetch(`${REDIS_URL}/get/${REDIS_KEY}`, {
+          headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+        });
+        const data = await resp.json();
+        if (data.result) snapshot = JSON.parse(data.result);
+      } catch (err) {
+        console.error("Kunde inte läsa från Upstash:", err.message);
+      }
+    }
+
+    if (!snapshot) {
+      try {
+        if (fs.existsSync(STATE_FILE)) {
+          snapshot = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+        }
+      } catch (err) {
+        console.error("Kunde inte läsa lokal state:", err.message);
+      }
+    }
+
+    if (!snapshot?.agents?.length) return false;
+
+    this.dayStartedAt = snapshot.dayStartedAt || this.dayStartedAt;
+    for (const saved of snapshot.agents) {
+      const agent = new Agent({ manager: this, kind: saved.kind, parentId: saved.parentId });
+      agent.restoreFrom(saved);
+      this.agents.set(agent.id, agent);
+      if (agent.status !== "stopped") agent.start();
+    }
+    this.log(`Återställde ${this.agents.size} agent(er) från tidigare session.`);
+    return true;
   }
 }
 

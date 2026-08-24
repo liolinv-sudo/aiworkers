@@ -234,6 +234,26 @@ function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&seed=${seed}&nologo=true&referrer=agentkolonin.app`;
 }
 
+// Hämtar en bild från Pollinations och sparar den som base64 REDAN NÄR
+// innehållet skapas - istället för att hämta den live varje gång någon
+// klickar på "ladda ner PDF". Det gör PDF-nedladdningen omedelbar och
+// pålitlig oavsett Pollinations svarstid, och löser problemet med att
+// bilder saknades eller att nedladdningen tog för lång tid och avbröts.
+async function fetchImageAsBase64(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const arrayBuffer = await resp.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString("base64");
+  } catch (err) {
+    return null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Grov tumregel för bildpris, baserad på vanlig prissättning för digital
 // konst på Etsy (8-15 dollar/72-160 kr för en "quality print"; 2-3 dollar
 // signalerar enligt säljarguider "disposability"). Sätts i den nedre delen
@@ -286,6 +306,24 @@ class Agent {
       earningsCents: this.earningsCents,
       cyclesRun: this.cyclesRun,
     };
+  }
+
+  // Återställer en agents identitet och historik från tidigare sparad data
+  // (t.ex. från Upstash vid serverstart). Behåller den nya instansens
+  // manager/timer-hantering, men skriver över allt annat med det sparade.
+  restoreFrom(saved) {
+    this.id = saved.id;
+    this.parentId = saved.parentId ?? this.parentId;
+    this.kind = saved.kind || this.kind;
+    this.name = saved.name || this.name;
+    this.createdAt = saved.createdAt || this.createdAt;
+    this.bio = saved.bio || this.bio;
+    this.outputs = saved.outputs || [];
+    this.earningsCents = saved.earningsCents || 0;
+    this.cyclesRun = saved.cyclesRun || 0;
+    // Om agenten var stoppad innan omstarten, håll den stoppad -
+    // annars startar start() om den normalt igen.
+    this.status = saved.status === "stopped" ? "stopped" : "idle";
   }
 
   start(intervalMs = 90000) {
@@ -373,6 +411,13 @@ class Agent {
     if (this.kind === "image") {
       let title, description, tags, subtitle;
 
+      // Undvik att Gemini fastnar i samma återkommande teman - skicka med
+      // de senaste titlarna och be den explicit variera sig.
+      const recentTitles = this.outputs.slice(-5).map((o) => o.title);
+      const avoidInstruction = recentTitles.length
+        ? ` Undvik teman som liknar dessa redan använda titlar: ${recentTitles.join("; ")}.`
+        : "";
+
       if (geminiKey) {
         const prompt =
           "Ge en kort, kreativ bildidé (t.ex. till ett bokomslag, ett " +
@@ -383,7 +428,8 @@ class Agent {
           "efter. Lägg också till en rad som börjar med 'UNDERRUBRIK:' " +
           "följt av en kort svensk underrubrik (max 12 ord), och en rad " +
           "som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord " +
-          "separerade med kommatecken.";
+          "separerade med kommatecken." +
+          avoidInstruction;
 
         const raw = await callGeminiText(geminiKey, prompt, 250);
         const extracted = extractTags(raw);
@@ -395,13 +441,17 @@ class Agent {
       } else {
         // Pollinations kräver ingen nyckel alls, så bildagenten fungerar
         // även helt utan GEMINI_API_KEY - bara med enklare, förvalda idéer.
-        description = pick(IMAGE_IDEA_FALLBACKS);
+        const unused = IMAGE_IDEA_FALLBACKS.filter((f) => !recentTitles.some((t) => t.includes(f.slice(0, 15))));
+        description = pick(unused.length ? unused : IMAGE_IDEA_FALLBACKS);
         title = `Bildidé #${this.cyclesRun + 1} av ${this.name}`;
         tags = [];
         subtitle = "";
       }
 
       const imageUrl = buildImageUrl(description);
+      // Cacha bilden som base64 direkt, så PDF-nedladdning senare blir
+      // omedelbar istället för att bero på en live-hämtning från Pollinations.
+      const imageBase64 = await fetchImageAsBase64(imageUrl);
 
       return {
         id: nanoid(6),
@@ -412,6 +462,7 @@ class Agent {
         tags,
         isImage: true,
         imageUrl,
+        imageBase64,
         suggestedPriceKr: estimateImagePriceKr(),
         marketplaces: MARKETPLACES.image,
         createdAt: new Date().toISOString(),
@@ -576,15 +627,31 @@ class Agent {
       // Bara var tredje kapitel får en riktig bild (istället för alla 10) -
       // annars laddas för många Pollinations-bilder samtidigt och nekas av
       // deras hastighetsgräns (1 anrop/15 sek för anonyma anrop).
-      const illustrationUrl =
-        illustrationIdea && i % 3 === 0
-          ? buildImageUrl(illustrationIdea, { width: 900, height: 560 })
-          : null;
-      chapters.push({ title: chapterTitles[i], text, illustrationIdea, illustrationUrl });
+      let illustrationUrl = null;
+      let illustrationBase64 = null;
+      if (illustrationIdea && i % 3 === 0) {
+        illustrationUrl = buildImageUrl(illustrationIdea, { width: 900, height: 560 });
+        // Cacha bilden som base64 NU (medan boken skrivs) istället för att
+        // hämta den live vid PDF-nedladdning - gör nedladdningen omedelbar
+        // och pålitlig. En kort väntan här stör inte, eftersom bokskrivning
+        // redan tar ett par minuter totalt.
+        this.manager.log(`${this.name} genererar illustration till kapitel ${i + 1}…`);
+        illustrationBase64 = await fetchImageAsBase64(illustrationUrl);
+        await sleep(3000); // liten marginal mot Pollinations hastighetsgräns
+      }
+      chapters.push({
+        title: chapterTitles[i],
+        text,
+        illustrationIdea,
+        illustrationUrl,
+        illustrationBase64,
+      });
     }
 
     const coverPrompt = `book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
     const coverImageUrl = buildImageUrl(coverPrompt, { width: 800, height: 1200 });
+    this.manager.log(`${this.name} genererar bokomslag…`);
+    const coverImageBase64 = await fetchImageAsBase64(coverImageUrl);
 
     const totalWords = chapters.reduce(
       (sum, c) => sum + c.text.split(/\s+/).filter(Boolean).length,
@@ -595,6 +662,7 @@ class Agent {
     output.isBook = true;
     output.chapters = chapters;
     output.coverImageUrl = coverImageUrl;
+    output.coverImageBase64 = coverImageBase64;
     output.subtitle = bookSubtitle || output.subtitle;
     output.pages = pages;
     output.suggestedPriceKr = price;
