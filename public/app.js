@@ -136,7 +136,6 @@ function renderAgent(agent) {
     card.dataset.id = agent.id;
     card.querySelector(".btn-reproduce").addEventListener("click", () => reproduce(agent.id));
     card.querySelector(".btn-sale").addEventListener("click", () => openSaleDialog(agent.id));
-    card.querySelector(".btn-stop").addEventListener("click", () => stopAgent(agent.id));
     card.querySelector(".btn-info").addEventListener("click", () => openBioDialog(agent.id));
     grid.appendChild(card);
     cardEls.set(agent.id, card);
@@ -151,6 +150,16 @@ function renderAgent(agent) {
   card.querySelector(".agent-status").textContent = statusLabel(agent.status) + genreLabel;
   card.querySelector(".agent-latest").onclick = () => openOutputsDialog(agent.id);
 
+  // Stopp/starta om-knappen växlar text och funktion beroende på status.
+  const stopBtn = card.querySelector(".btn-stop");
+  if (agent.status === "stopped") {
+    stopBtn.textContent = "▶ Starta om";
+    stopBtn.onclick = () => resumeAgent(agent.id);
+  } else {
+    stopBtn.textContent = "Stoppa";
+    stopBtn.onclick = () => stopAgent(agent.id);
+  }
+
   const latest = agent.outputs[agent.outputs.length - 1];
   card.querySelector(".latest-title").innerHTML = latest ? renderMarkdownLite(latest.title) : "Väntar på första alstret…";
   card.querySelector(".latest-preview").innerHTML = latest ? renderMarkdownLite(latest.preview) : "";
@@ -160,14 +169,25 @@ function renderAgent(agent) {
 
   // Om historikvyn/biblioteket är öppna, skriv INTE över det man läser -
   // visa istället en liten banner man själv klickar på när man är redo.
+  // UNDANTAG: om personen just klickat på en knapp (skriv bok, översätt,
+  // Notes-utkast) och väntar på resultatet, uppdatera direkt istället för
+  // att gömma det bakom bannern - annars ser man aldrig svaret.
   if (isModalOpen("outputs-dialog") && outputsTargetId === agent.id) {
-    showUpdateBanner(outputsList, () => {
-      const a = agents.get(outputsTargetId);
-      if (a) renderOutputsList(a);
-    });
+    if (awaitingActionRefresh) {
+      renderOutputsList(agent);
+    } else {
+      showUpdateBanner(outputsList, () => {
+        const a = agents.get(outputsTargetId);
+        if (a) renderOutputsList(a);
+      });
+    }
   }
   if (isModalOpen("library-dialog")) {
-    showUpdateBanner(libraryList, renderLibrary);
+    if (awaitingActionRefresh) {
+      renderLibrary();
+    } else {
+      showUpdateBanner(libraryList, renderLibrary);
+    }
   }
 
   drawLineage();
@@ -269,6 +289,14 @@ async function stopAgent(agentId) {
   if (card) card.dataset.status = "stopped";
 }
 
+async function resumeAgent(agentId) {
+  const res = await fetch(`/api/agents/${agentId}/resume`, { method: "POST" });
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({}));
+    alert(error || "Kunde inte starta om agenten.");
+  }
+}
+
 let saleTargetId = null;
 
 function openSaleDialog(agentId) {
@@ -316,9 +344,30 @@ function renderOutputsList(agent) {
   queuePollinationsImages(outputsList);
 }
 
+// Sann medan en självinitierad åtgärd (bokskrivning, översättning,
+// Notes-utkast) pågår - gör att renderAgent uppdaterar öppna vyer direkt
+// istället för att gömma resultatet bakom "lugn läsning"-bannern. En
+// säkerhetstimer nollställer flaggan om inget mer hörs av.
+let awaitingActionRefresh = false;
+let awaitingActionTimer = null;
+
+function beginAwaitingAction(maxMs) {
+  awaitingActionRefresh = true;
+  clearTimeout(awaitingActionTimer);
+  awaitingActionTimer = setTimeout(() => {
+    awaitingActionRefresh = false;
+  }, maxMs);
+}
+
+function endAwaitingAction() {
+  awaitingActionRefresh = false;
+  clearTimeout(awaitingActionTimer);
+}
+
 async function translateOutput(agentId, outputId, btnEl) {
   btnEl.disabled = true;
   btnEl.textContent = "Översätter…";
+  beginAwaitingAction(30000);
   try {
     const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/translate`, { method: "POST" });
     if (!res.ok) {
@@ -326,18 +375,21 @@ async function translateOutput(agentId, outputId, btnEl) {
       alert(data.error || "Kunde inte översätta just nu.");
       btnEl.disabled = false;
       btnEl.textContent = "🇬🇧 Översätt till engelska";
+      endAwaitingAction();
     }
     // Resultatet strömmar in via socket ("agent:update") när det är klart.
   } catch (err) {
     alert("Nätverksfel: " + err.message);
     btnEl.disabled = false;
     btnEl.textContent = "🇬🇧 Översätt till engelska";
+    endAwaitingAction();
   }
 }
 
 async function generateNotesDraft(agentId, outputId, btnEl) {
   btnEl.disabled = true;
   btnEl.textContent = "Skapar utkast…";
+  beginAwaitingAction(20000);
   try {
     const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/notes-draft`, { method: "POST" });
     if (!res.ok) {
@@ -345,12 +397,14 @@ async function generateNotesDraft(agentId, outputId, btnEl) {
       alert(data.error || "Kunde inte skapa Notes-utkast just nu.");
       btnEl.disabled = false;
       btnEl.textContent = "📝 Skapa Notes-utkast";
+      endAwaitingAction();
     }
     // Resultatet strömmar in via socket ("agent:update") när det är klart.
   } catch (err) {
     alert("Nätverksfel: " + err.message);
     btnEl.disabled = false;
     btnEl.textContent = "📝 Skapa Notes-utkast";
+    endAwaitingAction();
   }
 }
 
@@ -591,6 +645,7 @@ function renderOutputItem(o, agentId, showAgentName) {
 async function expandToBook(agentId, outputId, btnEl) {
   btnEl.disabled = true;
   btnEl.textContent = "Skriver bok… (tar en stund)";
+  beginAwaitingAction(300000); // upp till 5 minuter för en hel bok med bilder
   try {
     const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/expand`, { method: "POST" });
     if (!res.ok) {
@@ -598,13 +653,15 @@ async function expandToBook(agentId, outputId, btnEl) {
       alert(data.error || "Kunde inte skapa boken just nu.");
       btnEl.disabled = false;
       btnEl.textContent = "📖 Skriv fullständig bok (~30 sidor)";
+      endAwaitingAction();
     }
     // Resultatet strömmar in via socket ("agent:update") när det är klart -
-    // renderOutputsList ritas om automatiskt.
+    // renderOutputsList ritas om automatiskt (se awaitingActionRefresh).
   } catch (err) {
     alert("Nätverksfel: " + err.message);
     btnEl.disabled = false;
     btnEl.textContent = "📖 Skriv fullständig bok (~30 sidor)";
+    endAwaitingAction();
   }
 }
 
@@ -787,15 +844,21 @@ function openLibraryDialog() {
 }
 
 let libraryGenreFilter = "";
+let libraryGroupBy = "agent";
+let librarySort = "new";
 const libraryGenreSelect = document.getElementById("library-genre-filter");
+const libraryGroupBySelect = document.getElementById("library-group-by");
+const librarySortSelect = document.getElementById("library-sort");
 
 function renderLibrary() {
   // Fyll genre-dropdownen med de kategorier som faktiskt förekommer bland
   // alla agenters alster just nu.
   const seenGenres = new Set();
+  const flatItems = [];
   for (const agent of agents.values()) {
     for (const o of agent.outputs) {
       if (o.genre?.category) seenGenres.add(o.genre.category);
+      flatItems.push({ agent, output: o });
     }
   }
   const currentGenreValue = libraryGenreSelect.value;
@@ -805,41 +868,52 @@ function renderLibrary() {
   libraryGenreSelect.value = seenGenres.has(currentGenreValue) ? currentGenreValue : "";
   libraryGenreFilter = libraryGenreSelect.value;
 
-  const sections = [];
-  for (const agent of agents.values()) {
-    if (!agent.outputs.length) continue;
-    let filtered =
-      libraryFilter === "all"
-        ? agent.outputs
-        : agent.outputs.filter((o) => classifyOutput(o) === libraryFilter);
-    if (libraryGenreFilter) {
-      filtered = filtered.filter((o) => o.genre?.category === libraryGenreFilter);
-    }
-    if (!filtered.length) continue;
-    sections.push({ agent, items: [...filtered].reverse() });
-  }
+  // Filtrera på typ och genre
+  let filtered = flatItems.filter(({ output }) => {
+    if (libraryFilter !== "all" && classifyOutput(output) !== libraryFilter) return false;
+    if (libraryGenreFilter && output.genre?.category !== libraryGenreFilter) return false;
+    return true;
+  });
 
-  if (!sections.length) {
+  if (!filtered.length) {
     libraryList.innerHTML = `<p class="outputs-empty">Inget att visa i den här kategorin ännu.</p>`;
     return;
   }
 
-  sections.sort((a, b) => a.agent.name.localeCompare(b.agent.name));
+  // Sortera (inom varje grupp sorteras det också, men detta avgör ordningen totalt)
+  filtered.sort((a, b) => {
+    const diff = new Date(a.output.createdAt) - new Date(b.output.createdAt);
+    return librarySort === "new" ? -diff : diff;
+  });
 
-  libraryList.innerHTML = sections
-    .map(
-      ({ agent, items }) => `
-      <details class="library-agent-section" open>
-        <summary>
-          <span class="lib-agent-name">${escapeHtml(agent.name)}</span>
-          <span class="lib-agent-count">${items.length} alster</span>
-        </summary>
-        <div class="library-agent-items">
-          ${items.map((o) => renderOutputItem(o, agent.id, false)).join("")}
-        </div>
-      </details>
-    `
-    )
+  // Gruppera antingen per agent eller per kategori
+  const groups = new Map(); // groupLabel -> items[]
+  for (const item of filtered) {
+    const label =
+      libraryGroupBy === "category"
+        ? item.output.genre?.category || "Utan kategori"
+        : item.agent.name;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(item);
+  }
+
+  const sortedLabels = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+  libraryList.innerHTML = sortedLabels
+    .map((label) => {
+      const items = groups.get(label);
+      return `
+        <details class="library-agent-section" open>
+          <summary>
+            <span class="lib-agent-name">${escapeHtml(label)}</span>
+            <span class="lib-agent-count">${items.length} alster</span>
+          </summary>
+          <div class="library-agent-items library-grid">
+            ${items.map(({ agent, output }) => renderOutputItem(output, agent.id, libraryGroupBy === "category")).join("")}
+          </div>
+        </details>
+      `;
+    })
     .join("");
   bindOutputActions(libraryList);
   queuePollinationsImages(libraryList);
@@ -847,6 +921,16 @@ function renderLibrary() {
 
 libraryGenreSelect.addEventListener("change", () => {
   libraryGenreFilter = libraryGenreSelect.value;
+  renderLibrary();
+});
+
+libraryGroupBySelect.addEventListener("change", () => {
+  libraryGroupBy = libraryGroupBySelect.value;
+  renderLibrary();
+});
+
+librarySortSelect.addEventListener("change", () => {
+  librarySort = librarySortSelect.value;
   renderLibrary();
 });
 
