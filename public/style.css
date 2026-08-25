@@ -511,7 +511,8 @@ body {
 
 .dialog-sub { font-size: 11.5px; color: var(--ink-dim); margin: 0 0 16px 0; }
 
-#sale-form label {
+#sale-form label,
+#genre-dialog label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -522,7 +523,8 @@ body {
   letter-spacing: 0.04em;
 }
 
-#sale-form input {
+#sale-form input,
+#genre-dialog select {
   font-family: var(--font-mono);
   background: var(--bg-card);
   border: 1px solid var(--line);
@@ -533,9 +535,40 @@ body {
   text-transform: none;
 }
 
-#sale-form input:focus {
+#sale-form input:focus,
+#genre-dialog select:focus {
   outline: none;
   border-color: var(--alive);
+}
+
+#genre-dialog select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  text-transform: none !important;
+  font-size: 12.5px !important;
+  color: var(--ink) !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--alive);
+}
+
+.genre-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--violet);
+  border: 1px solid var(--violet);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 6px;
 }
 
 .dialog-actions {
@@ -790,6 +823,17 @@ button:focus-visible, input:focus-visible {
   border-color: var(--alive);
   color: #06120c;
   font-weight: 600;
+}
+
+.lib-genre-select {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-card);
+  color: var(--ink-dim);
+  margin-left: auto;
 }
 
 .update-banner {
@@ -1100,6 +1144,23 @@ button:focus-visible, input:focus-visible {
 
 .output-item-image {
   border-color: var(--violet);
+}
+
+.lazy-poll-img {
+  background: var(--bg-card);
+  min-height: 120px;
+}
+
+.lazy-poll-img.img-pending {
+  position: relative;
+  background: linear-gradient(90deg, var(--bg-card) 0%, var(--bg) 50%, var(--bg-card) 100%);
+  background-size: 200% 100%;
+  animation: img-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes img-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ---- Bio-dialog ---- */

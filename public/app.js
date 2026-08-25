@@ -46,6 +46,49 @@ function isModalOpen(id) {
   return document.getElementById(id).classList.contains("open");
 }
 
+// Pollinations gratisnivå tillåter bara ett anonymt bildanrop var 15:e
+// sekund. Om flera bilder visas i samma vy måste de laddas EN I TAGET med
+// paus emellan, annars nekas de flesta och visas som trasiga ikoner.
+const POLLINATIONS_STAGGER_MS = 6000;
+let pollinationsQueue = [];
+let pollinationsQueueRunning = false;
+
+function queuePollinationsImages(container) {
+  const imgs = container.querySelectorAll("img.lazy-poll-img:not([data-queued])");
+  imgs.forEach((img) => {
+    img.dataset.queued = "1";
+    img.classList.add("img-pending");
+    pollinationsQueue.push(img);
+  });
+  runPollinationsQueue();
+}
+
+function runPollinationsQueue() {
+  if (pollinationsQueueRunning) return;
+  pollinationsQueueRunning = true;
+  processNextPollinationsImage();
+}
+
+function processNextPollinationsImage() {
+  const img = pollinationsQueue.shift();
+  if (!img) {
+    pollinationsQueueRunning = false;
+    return;
+  }
+  // Hoppa över om bilden inte längre finns i dokumentet (t.ex. stängd dialog)
+  if (!document.body.contains(img)) {
+    processNextPollinationsImage();
+    return;
+  }
+  img.src = img.dataset.src;
+  const proceed = () => {
+    img.classList.remove("img-pending");
+    setTimeout(processNextPollinationsImage, POLLINATIONS_STAGGER_MS);
+  };
+  img.addEventListener("load", proceed, { once: true });
+  img.addEventListener("error", proceed, { once: true });
+}
+
 // Visar en liten "nytt innehåll"-banner högst upp i en behållare istället
 // för att skriva över det användaren just nu läser. Klick på banner-knappen
 // kör den angivna uppdateringsfunktionen och tar bort bannern.
@@ -102,7 +145,10 @@ function renderAgent(agent) {
   card.dataset.status = agent.status;
   card.querySelector(".agent-name").textContent = agent.name;
   card.querySelector(".agent-name").onclick = () => openOutputsDialog(agent.id);
-  card.querySelector(".agent-status").textContent = statusLabel(agent.status);
+  const genreLabel = agent.genre
+    ? ` · ${agent.genre.category}${agent.genre.subgenre ? " (" + agent.genre.subgenre + ")" : ""}`
+    : "";
+  card.querySelector(".agent-status").textContent = statusLabel(agent.status) + genreLabel;
   card.querySelector(".agent-latest").onclick = () => openOutputsDialog(agent.id);
 
   const latest = agent.outputs[agent.outputs.length - 1];
@@ -197,11 +243,11 @@ function escapeHtml(str) {
 
 // ---- Actions ----
 
-async function spawnAgent(kind) {
+async function spawnAgent(kind, genre = null) {
   const res = await fetch("/api/agents/spawn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind }),
+    body: JSON.stringify({ kind, genre }),
   });
   if (!res.ok) {
     const { error } = await res.json();
@@ -267,6 +313,7 @@ function renderOutputsList(agent) {
   const items = [...agent.outputs].reverse();
   outputsList.innerHTML = items.map((o) => renderOutputItem(o, agent.id)).join("");
   bindOutputActions(outputsList);
+  queuePollinationsImages(outputsList);
 }
 
 async function translateOutput(agentId, outputId, btnEl) {
@@ -363,6 +410,12 @@ function renderTags(tags) {
   return `<div class="tag-row">${tags.map((t) => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join("")}</div>`;
 }
 
+function renderGenreBadge(o) {
+  if (!o.genre) return "";
+  const label = o.genre.subgenre ? `${o.genre.category} — ${o.genre.subgenre}` : o.genre.category;
+  return `<span class="genre-badge">${escapeHtml(label)}</span>`;
+}
+
 function renderNotesSection(o, agentId) {
   if (o.notesDraft) {
     return `
@@ -397,7 +450,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           <h5>${i + 1}. ${renderMarkdownLite(ch.title)}</h5>
           ${
             ch.illustrationUrl
-              ? `<img class="chapter-illustration" src="${ch.illustrationUrl}" alt="${escapeHtml(ch.illustrationIdea || "")}" loading="lazy" />`
+              ? `<img class="chapter-illustration lazy-poll-img" data-src="${ch.illustrationUrl}" alt="${escapeHtml(ch.illustrationIdea || "")}" />`
               : ch.illustrationIdea
                 ? `<div class="illustration-placeholder">🖼 Illustrationsidé: ${escapeHtml(ch.illustrationIdea)}</div>`
                 : ""
@@ -418,7 +471,8 @@ function renderOutputItem(o, agentId, showAgentName) {
           <span class="output-time">${time} ${agentLabel}</span>
         </div>
         ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
-        ${o.coverImageUrl ? `<img class="book-cover" src="${o.coverImageUrl}" alt="Omslag: ${escapeHtml(o.title)}" loading="lazy" />` : ""}
+        ${renderGenreBadge(o)}
+        ${o.coverImageUrl ? `<img class="book-cover lazy-poll-img" data-src="${o.coverImageUrl}" alt="Omslag: ${escapeHtml(o.title)}" />` : ""}
         <div class="book-meta">
           <span class="book-meta-chip">${o.pages || "?"} sidor</span>
           <span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr ?? "?"} kr</span>
@@ -492,7 +546,7 @@ function renderOutputItem(o, agentId, showAgentName) {
           <span class="output-time">${time} ${agentLabel}</span>
         </div>
         ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
-        <img class="generated-image" src="${o.imageUrl}" alt="${escapeHtml(o.title)}" loading="lazy" />
+        <img class="generated-image lazy-poll-img" data-src="${o.imageUrl}" alt="${escapeHtml(o.title)}" />
         <div class="book-meta">
           ${o.suggestedPriceKr ? `<span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr} kr</span>` : ""}
         </div>
@@ -518,6 +572,7 @@ function renderOutputItem(o, agentId, showAgentName) {
         <span class="output-time">${time} ${agentLabel}</span>
       </div>
       ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
+      ${renderGenreBadge(o)}
       <p>${renderMarkdownLite(o.body || o.preview)}</p>
       ${renderTags(o.tags)}
       ${hasEn ? `<p class="translated-en"><strong>EN:</strong> ${renderMarkdownLite(o.translations.en.body)}</p>` : ""}
@@ -634,6 +689,7 @@ function openBioDialog(agentId) {
 
   bioContent.innerHTML = `
     <dl class="bio-list">
+      ${agent.genre ? `<dt>Specialisering</dt><dd>${escapeHtml(agent.genre.category)}${agent.genre.subgenre ? " — " + escapeHtml(agent.genre.subgenre) : ""}${agent.genre.illustrated ? " (illustrerad)" : ""}</dd>` : ""}
       <dt>Ålder</dt><dd>${escapeHtml(String(b.age))} år <span class="bio-note">(helt påhittat, förstås)</span></dd>
       <dt>Född</dt><dd>${escapeHtml(String(b.birthYear))}</dd>
       <dt>Aktiverad</dt><dd>${escapeHtml(activated)}</dd>
@@ -647,7 +703,68 @@ function openBioDialog(agentId) {
   openModal("bio-dialog");
 }
 
-document.getElementById("spawn-text").addEventListener("click", () => spawnAgent("text"));
+// ---- Genre-väljare för nya textagenter ----
+
+let genreTaxonomy = {};
+
+fetch("/api/genres")
+  .then((r) => r.json())
+  .then((data) => {
+    genreTaxonomy = data;
+    const categorySelect = document.getElementById("genre-category");
+    Object.keys(genreTaxonomy).forEach((cat) => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      categorySelect.appendChild(opt);
+    });
+  })
+  .catch(() => {});
+
+const genreCategorySelect = document.getElementById("genre-category");
+const genreSubgenreSelect = document.getElementById("genre-subgenre");
+const genreIllustratedWrap = document.getElementById("genre-illustrated-wrap");
+const genreIllustratedCheckbox = document.getElementById("genre-illustrated");
+
+genreCategorySelect.addEventListener("change", () => {
+  const category = genreCategorySelect.value;
+  genreSubgenreSelect.innerHTML = "";
+  genreIllustratedCheckbox.checked = false;
+
+  if (!category) {
+    genreSubgenreSelect.disabled = true;
+    genreSubgenreSelect.innerHTML = `<option value="">— Välj kategori först —</option>`;
+    genreIllustratedWrap.style.display = "none";
+    return;
+  }
+
+  const config = genreTaxonomy[category];
+  genreSubgenreSelect.disabled = false;
+  genreSubgenreSelect.innerHTML =
+    `<option value="">— Valfri (ingen specifik) —</option>` +
+    config.subgenres.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+  genreIllustratedWrap.style.display = config.illustratable ? "flex" : "none";
+});
+
+document.getElementById("spawn-text").addEventListener("click", () => {
+  genreCategorySelect.value = "";
+  genreCategorySelect.dispatchEvent(new Event("change"));
+  openModal("genre-dialog");
+});
+
+document.getElementById("genre-confirm").addEventListener("click", () => {
+  const category = genreCategorySelect.value;
+  const genre = category
+    ? {
+        category,
+        subgenre: genreSubgenreSelect.value || null,
+        illustrated: genreIllustratedCheckbox.checked,
+      }
+    : null;
+  spawnAgent("text", genre);
+  closeModal("genre-dialog");
+});
+
 document.getElementById("spawn-image").addEventListener("click", () => spawnAgent("image"));
 document.getElementById("spawn-journalist-feature").addEventListener("click", () => spawnAgent("journalist_feature"));
 document.getElementById("spawn-journalist-column").addEventListener("click", () => spawnAgent("journalist_column"));
@@ -669,14 +786,35 @@ function openLibraryDialog() {
   openModal("library-dialog");
 }
 
+let libraryGenreFilter = "";
+const libraryGenreSelect = document.getElementById("library-genre-filter");
+
 function renderLibrary() {
+  // Fyll genre-dropdownen med de kategorier som faktiskt förekommer bland
+  // alla agenters alster just nu.
+  const seenGenres = new Set();
+  for (const agent of agents.values()) {
+    for (const o of agent.outputs) {
+      if (o.genre?.category) seenGenres.add(o.genre.category);
+    }
+  }
+  const currentGenreValue = libraryGenreSelect.value;
+  libraryGenreSelect.innerHTML =
+    `<option value="">Alla genrer</option>` +
+    [...seenGenres].sort().map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+  libraryGenreSelect.value = seenGenres.has(currentGenreValue) ? currentGenreValue : "";
+  libraryGenreFilter = libraryGenreSelect.value;
+
   const sections = [];
   for (const agent of agents.values()) {
     if (!agent.outputs.length) continue;
-    const filtered =
+    let filtered =
       libraryFilter === "all"
         ? agent.outputs
         : agent.outputs.filter((o) => classifyOutput(o) === libraryFilter);
+    if (libraryGenreFilter) {
+      filtered = filtered.filter((o) => o.genre?.category === libraryGenreFilter);
+    }
     if (!filtered.length) continue;
     sections.push({ agent, items: [...filtered].reverse() });
   }
@@ -704,7 +842,13 @@ function renderLibrary() {
     )
     .join("");
   bindOutputActions(libraryList);
+  queuePollinationsImages(libraryList);
 }
+
+libraryGenreSelect.addEventListener("change", () => {
+  libraryGenreFilter = libraryGenreSelect.value;
+  renderLibrary();
+});
 
 document.getElementById("open-library").addEventListener("click", openLibraryDialog);
 document.getElementById("open-subscribe").addEventListener("click", () => openModal("subscribe-dialog"));

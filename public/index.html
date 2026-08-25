@@ -149,6 +149,9 @@
       <button type="button" class="lib-filter-btn" data-filter="article">📰 Artiklar</button>
       <button type="button" class="lib-filter-btn" data-filter="image">🎨 Bilder</button>
       <button type="button" class="lib-filter-btn" data-filter="idea">💡 Korta idéer</button>
+      <select id="library-genre-filter" class="lib-genre-select">
+        <option value="">Alla genrer</option>
+      </select>
     </div>
     <div id="library-list" class="outputs-list"></div>
   </div>
@@ -238,6 +241,36 @@
         <h4>Källor</h4>
         <p class="market-note">Baserat på webbresearch om Gumroad-, Etsy-, Amazon KDP- och frilansmarknadens prissättning, sammanställd i denna konversation augusti 2026.</p>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="genre-dialog" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Ny textagent</h3>
+      <button type="button" class="modal-x" data-close-modal="genre-dialog" aria-label="Stäng">✕</button>
+    </div>
+    <p class="dialog-sub">Välj vad agenten ska specialisera sig på (eller hoppa över för en generell agent).</p>
+    <label>
+      Kategori
+      <select id="genre-category">
+        <option value="">— Generell (ingen specifik genre) —</option>
+      </select>
+    </label>
+    <label>
+      Genre/inriktning
+      <select id="genre-subgenre" disabled>
+        <option value="">— Välj kategori först —</option>
+      </select>
+    </label>
+    <label class="checkbox-label" id="genre-illustrated-wrap" style="display:none;">
+      <input type="checkbox" id="genre-illustrated" />
+      Illustrerad (bilder till fler kapitel/recept)
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" data-close-modal="genre-dialog">Avbryt</button>
+      <button type="button" class="btn btn-primary" id="genre-confirm">Skapa agent</button>
     </div>
   </div>
 </div>
