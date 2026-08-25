@@ -330,6 +330,20 @@ const GENRE_TAXONOMY = {
   },
 };
 
+// Frontend behöver bara bild-URL:erna för att visa <img>-taggar - de tunga
+// base64-fälten behövs bara på servern (för PDF-generering). Att skicka
+// dem via socket.io i varje uppdatering gjorde payloaden onödigt stor och
+// långsam. Den här funktionen används bara för DATA SOM SKICKAS TILL
+// KLIENTEN - den faktiska this.outputs-arrayen på servern behåller all
+// base64-data orört, så PDF-routen fortfarande hittar den.
+function stripBase64ForClient(output) {
+  const { imageBase64, coverImageBase64, chapters, ...rest } = output;
+  if (chapters) {
+    rest.chapters = chapters.map(({ illustrationBase64, ...ch }) => ch);
+  }
+  return rest;
+}
+
 class Agent {
   constructor({ parentId = null, manager, kind = "text", genre = null }) {
     this.id = nanoid(8);
@@ -360,7 +374,7 @@ class Agent {
       status: this.status,
       createdAt: this.createdAt,
       bio: this.bio,
-      outputs: this.outputs, // alla sparade alster, för historikvyn
+      outputs: this.outputs.map(stripBase64ForClient), // se kommentar nedan
       outputCount: this.outputs.length,
       earningsCents: this.earningsCents,
       cyclesRun: this.cyclesRun,
@@ -729,22 +743,55 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     // enheter (varannan) - annars var tredje, som en trevlig extra touch.
     const illustrationEvery = illustrated ? 2 : 3;
 
+    // Prosa och manus ska vara EN sammanhängande berättelse med samma
+    // karaktärer genom hela verket - inte fristående variationer på samma
+    // premiss (poesi/recept är naturligt fristående enheter, så det gäller
+    // dem inte). Vi bygger upp en kort löpande sammanfattning som skickas
+    // med i varje ny kapitelprompt.
+    const continuityMatters = format === "prose" || format === "script";
+    let storySoFar = "";
+
     const chapters = [];
     for (let i = 0; i < chapterTitles.length; i++) {
       this.manager.log(
         `${this.name} skriver ${UNIT_WORD} ${i + 1}/${chapterTitles.length}: "${chapterTitles[i]}"`
       );
+
+      const continuityContext =
+        continuityMatters && storySoFar
+          ? `\n\nDetta är EN sammanhängande berättelse, inte fristående ` +
+            `delar. Vad som hänt hittills: ${storySoFar}\n\nFortsätt med ` +
+            `EXAKT SAMMA huvudkaraktär(er), namn och miljö som ovan - ` +
+            `hitta inte på nya huvudpersoner eller en ny premiss.`
+          : "";
+
+      const summaryInstruction = continuityMatters
+        ? ` Avsluta därefter med en rad som börjar med "SAMMANFATTNING:" ` +
+          `följt av EN mening som sammanfattar vad som hände i just detta ` +
+          `avsnitt och vilka karaktärer som förekom (används för att hålla ` +
+          `ihop berättelsen till nästa del).`
+        : "";
+
       const chapterPrompt =
         `Skriv ${UNIT_WORD} ${i + 1} med rubriken/namnet "${chapterTitles[i]}" ` +
-        `till verket "${output.title}"${genreContext}. ${contentInstruction} ` +
-        `Avsluta därefter med en ny rad som börjar med "ILLUSTRATION:" följt ` +
-        `av en kort visuell beskrivning (max 15 ord, gärna på engelska för ` +
-        `bästa resultat i en bildgenerator) av en passande bild.`;
+        `till verket "${output.title}"${genreContext}.${continuityContext} ` +
+        `${contentInstruction}${summaryInstruction} Avsluta därefter med en ` +
+        `ny rad som börjar med "ILLUSTRATION:" följt av en kort visuell ` +
+        `beskrivning (max 15 ord, gärna på engelska för bästa resultat i en ` +
+        `bildgenerator) av en passande bild.`;
 
-      const chapterRaw = await callGeminiText(geminiKey, chapterPrompt, 900);
+      const chapterRaw = await callGeminiText(geminiKey, chapterPrompt, 950);
       const illMatch = chapterRaw.match(/ILLUSTRATION:\s*(.+)/i);
       const illustrationIdea = illMatch ? illMatch[1].trim() : null;
-      const text = chapterRaw.replace(/ILLUSTRATION:.*$/is, "").trim();
+      const summaryMatch = chapterRaw.match(/SAMMANFATTNING:\s*(.+?)(?:\n|$)/i);
+      if (summaryMatch && continuityMatters) {
+        storySoFar += (storySoFar ? " " : "") + summaryMatch[1].trim();
+        if (storySoFar.length > 1200) storySoFar = storySoFar.slice(-1200); // begränsa prompttillväxt
+      }
+      const text = chapterRaw
+        .replace(/ILLUSTRATION:.*$/is, "")
+        .replace(/SAMMANFATTNING:.*$/im, "")
+        .trim();
       // Bara var N:e enhet får en riktig bild - annars laddas för många
       // Pollinations-bilder samtidigt och nekas av deras hastighetsgräns
       // (1 anrop/15 sek för anonyma anrop).
@@ -758,7 +805,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
         // redan tar ett par minuter totalt.
         this.manager.log(`${this.name} genererar illustration till ${UNIT_WORD} ${i + 1}…`);
         illustrationBase64 = await fetchImageAsBase64(illustrationUrl);
-        await sleep(3000); // liten marginal mot Pollinations hastighetsgräns
+        await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
       }
       chapters.push({
         title: chapterTitles[i],
@@ -772,6 +819,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     const coverPrompt = `book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
     const coverImageUrl = buildImageUrl(coverPrompt, { width: 800, height: 1200 });
     this.manager.log(`${this.name} genererar bokomslag…`);
+    await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
     const coverImageBase64 = await fetchImageAsBase64(coverImageUrl);
 
     const totalWords = chapters.reduce(

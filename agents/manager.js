@@ -58,6 +58,17 @@ class AgentManager {
     this.persist();
   }
 
+  // Startar om en tidigare stoppad agent - den fortsätter jobba från där
+  // den var, med samma historik, bio och genre intakt.
+  resumeAgent(agentId) {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error("Agent hittades inte.");
+    agent.start();
+    this.log(`${agent.name} startades om.`);
+    this.broadcastAgentUpdate(agent);
+    this.persist();
+  }
+
   removeAgent(agentId) {
     const agent = this.agents.get(agentId);
     if (!agent) return;
