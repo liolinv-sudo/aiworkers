@@ -5,6 +5,7 @@ const path = require("path");
 const { Server } = require("socket.io");
 const PDFDocument = require("pdfkit");
 const { AgentManager } = require("./agents/manager");
+const { GENRE_TAXONOMY } = require("./agents/agent");
 
 const app = express();
 const server = http.createServer(app);
@@ -25,6 +26,12 @@ app.get("/api/stats", (req, res) => {
   res.json(manager.getStats());
 });
 
+// Lista kategorier/genrer en textagent kan specialisera sig inom, för att
+// fylla i väljaren när man skapar en ny textagent i gränssnittet.
+app.get("/api/genres", (req, res) => {
+  res.json(GENRE_TAXONOMY);
+});
+
 // Betalningslänk (PayPal.me, Swish-nummer, eller annat). Sätts via
 // miljövariabel så du styr själv vart pengarna går. Detta är BARA en
 // länk till ditt eget konto - ingen automatisk checkout eller
@@ -41,7 +48,24 @@ app.post("/api/agents/spawn", (req, res) => {
   try {
     const allowedKinds = ["text", "image", "journalist_feature", "journalist_column"];
     const kind = allowedKinds.includes(req.body.kind) ? req.body.kind : "text";
-    const agent = manager.spawnAgent({ kind });
+
+    // Genre är bara relevant (och valideras) för textagenter.
+    let genre = null;
+    if (kind === "text" && req.body.genre?.category) {
+      const categoryConfig = GENRE_TAXONOMY[req.body.genre.category];
+      if (categoryConfig) {
+        const subgenre = categoryConfig.subgenres.includes(req.body.genre.subgenre)
+          ? req.body.genre.subgenre
+          : null;
+        genre = {
+          category: req.body.genre.category,
+          subgenre,
+          illustrated: categoryConfig.illustratable ? !!req.body.genre.illustrated : false,
+        };
+      }
+    }
+
+    const agent = manager.spawnAgent({ kind, genre });
     res.json(agent.toJSON());
   } catch (err) {
     res.status(400).json({ error: err.message });
