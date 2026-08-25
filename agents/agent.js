@@ -273,12 +273,70 @@ const IMAGE_IDEA_FALLBACKS = [
   "en gammal bokhandel fylld med böcker, varmt ljus",
 ];
 
+// Kategorier och genrer en textagent kan specialisera sig inom. "format"
+// avgör vilken formatfamilj bok-expansionen använder (prosa/poesi/recept/
+// manus), och "illustratable" styr om "illustrerad"-kryssrutan visas.
+const GENRE_TAXONOMY = {
+  "Barnbok": {
+    subgenres: ["Bilderbok (yngre barn)", "Kapitelbok (mellanstadiet)", "Lärobok för barn"],
+    format: "prose",
+    illustratable: true,
+  },
+  "Poesi": {
+    subgenres: ["Lyrik", "Haiku-samling", "Rimsagor", "Sonetter"],
+    format: "poetry",
+    illustratable: true,
+  },
+  "Skönlitteratur": {
+    subgenres: [
+      "Kriminalroman", "Pusseldeckare", "Historisk roman", "Romantik",
+      "Science fiction", "Fantasy", "Litterär roman", "Skräck",
+    ],
+    format: "prose",
+    illustratable: false,
+  },
+  "Facklitteratur": {
+    subgenres: [
+      "Självhjälp", "Biografi", "Populärvetenskap", "Matematikbok",
+      "Astronomibok (lågstadiet)", "Historiebok", "Ekonomi/privatekonomi",
+    ],
+    format: "prose",
+    illustratable: true,
+  },
+  "Kokbok": {
+    subgenres: ["Vardagsmat", "Bakning", "Veganskt", "Internationellt kök", "Snabbmat"],
+    format: "recipe",
+    illustratable: true,
+  },
+  "Teatermanus": {
+    subgenres: ["Komedi", "Drama", "Barnteater", "Tragedi"],
+    format: "script",
+    illustratable: false,
+  },
+  "TV-seriemanus": {
+    subgenres: ["Sitcom", "Dramaserie", "Humorserie", "Dokusåpa-format"],
+    format: "script",
+    illustratable: false,
+  },
+  "Filmmanus": {
+    subgenres: ["Kortfilm", "Thriller", "Komedi", "Drama"],
+    format: "script",
+    illustratable: false,
+  },
+  "Religiös skrift": {
+    subgenres: ["Andaktstexter", "Liknelser", "Bön och meditation", "Etiska reflektioner"],
+    format: "prose",
+    illustratable: false,
+  },
+};
+
 class Agent {
-  constructor({ parentId = null, manager, kind = "text" }) {
+  constructor({ parentId = null, manager, kind = "text", genre = null }) {
     this.id = nanoid(8);
     this.parentId = parentId;
     this.manager = manager;
-    this.kind = kind; // "text" | "image"
+    this.kind = kind; // "text" | "image" | "journalist_feature" | "journalist_column"
+    this.genre = genre; // { category, subgenre, illustrated } | null (null = generisk textagent)
     this.name =
       NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)] +
       "-" +
@@ -297,6 +355,7 @@ class Agent {
       id: this.id,
       parentId: this.parentId,
       kind: this.kind,
+      genre: this.genre,
       name: this.name,
       status: this.status,
       createdAt: this.createdAt,
@@ -315,6 +374,7 @@ class Agent {
     this.id = saved.id;
     this.parentId = saved.parentId ?? this.parentId;
     this.kind = saved.kind || this.kind;
+    this.genre = saved.genre ?? this.genre;
     this.name = saved.name || this.name;
     this.createdAt = saved.createdAt || this.createdAt;
     this.bio = saved.bio || this.bio;
@@ -367,17 +427,46 @@ class Agent {
   async generateContent() {
     const geminiKey = process.env.GEMINI_API_KEY;
 
+// Bygger en idé-prompt anpassad efter vald kategori/genre. Formatfamiljen
+// (prosa/poesi/recept/manus) styr vilken typ av idé som efterfrågas.
+function buildGenreIdeaPrompt(genre, recentTitles) {
+  const config = GENRE_TAXONOMY[genre.category] || { format: "prose" };
+  const label = genre.subgenre ? `${genre.category} (${genre.subgenre})` : genre.category;
+  const avoid = recentTitles.length
+    ? ` Undvik teman som liknar dessa redan använda titlar: ${recentTitles.join("; ")}.`
+    : "";
+
+  const familyInstruction = {
+    poetry: "Ge en idé till en diktsamling - ett tema, en känsla och en röst, inte en enskild färdig dikt.",
+    recipe: "Ge en idé till en maträtt/ett recept som skulle passa i en kokbok inom denna genre.",
+    script: "Ge en premiss/logline till ett manus - en kort sammanfattning av handling och huvudkaraktär(er).",
+    prose: "Ge en bokidé - premiss, huvudkaraktär eller ämne.",
+  }[config.format];
+
+  return (
+    `Du arbetar inom kategorin "${label}". ${familyInstruction} ` +
+    `Idén ska kunna säljas online. Svara med en titel på första raden och " +
+    "en kort beskrivning (max 3 meningar) på raderna efter. Lägg också " +
+    "till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, säljande " +
+    "underrubrik (max 12 ord), och en rad som börjar med 'TAGGAR:' följt " +
+    "av 3-5 relevanta svenska sökord/ämnesord separerade med kommatecken.` +
+    avoid
+  );
+}
+
     if (this.kind === "text") {
       if (geminiKey) {
-        const prompt =
-          "Ge mig en kort, säljbar produktidé (t.ex. en novell-pitch, " +
-          "ett blogginlägg, eller copywriting-exempel) som skulle kunna " +
-          "säljas online. Svara med en titel på första raden och en kort " +
-          "beskrivning (max 3 meningar) på raderna efter. Lägg också till " +
-          "en rad som börjar med 'UNDERRUBRIK:' följt av en kort, säljande " +
-          "underrubrik (max 12 ord), och en rad som börjar med 'TAGGAR:' " +
-          "följt av 3-5 relevanta svenska sökord/ämnesord separerade med " +
-          "kommatecken.";
+        const recentTitles = this.outputs.slice(-5).map((o) => o.title);
+        const prompt = this.genre
+          ? buildGenreIdeaPrompt(this.genre, recentTitles)
+          : "Ge mig en kort, säljbar produktidé (t.ex. en novell-pitch, " +
+            "ett blogginlägg, eller copywriting-exempel) som skulle kunna " +
+            "säljas online. Svara med en titel på första raden och en kort " +
+            "beskrivning (max 3 meningar) på raderna efter. Lägg också till " +
+            "en rad som börjar med 'UNDERRUBRIK:' följt av en kort, säljande " +
+            "underrubrik (max 12 ord), och en rad som börjar med 'TAGGAR:' " +
+            "följt av 3-5 relevanta svenska sökord/ämnesord separerade med " +
+            "kommatecken.";
 
         const raw = await callGeminiText(geminiKey, prompt, 380);
         const { tags, subtitle, cleanedText } = extractTags(raw);
@@ -390,6 +479,7 @@ class Agent {
           preview: bodyText.slice(0, 280),
           body: bodyText || firstLine,
           tags,
+          genre: this.genre,
           createdAt: new Date().toISOString(),
         };
       }
@@ -404,6 +494,7 @@ class Agent {
         body:
           "(Demo-läge: sätt GEMINI_API_KEY i miljövariablerna på Render " +
           "för att låta agenten skapa riktigt innehåll med Gemini.)",
+        genre: this.genre,
         createdAt: new Date().toISOString(),
       };
     }
@@ -582,18 +673,27 @@ class Agent {
     const output = this.outputs.find((o) => o.id === outputId);
     if (!output) throw new Error("Alster hittades inte.");
 
-    const CHAPTER_COUNT = 10;
+    const genre = output.genre || this.genre;
+    const format = genre ? GENRE_TAXONOMY[genre.category]?.format || "prose" : "prose";
+    const illustrated = !!genre?.illustrated;
+    const genreLabel = genre ? (genre.subgenre ? `${genre.category} (${genre.subgenre})` : genre.category) : null;
+
+    const UNIT_WORD = { prose: "kapitel", poetry: "dikt", recipe: "recept", script: "scen" }[format];
+    const UNIT_WORD_PLURAL = { prose: "kapitelrubriker", poetry: "dikttitlar", recipe: "receptnamn", script: "scenrubriker" }[format];
+    const CHAPTER_COUNT = format === "recipe" ? 12 : format === "poetry" ? 14 : 10;
+
     this.manager.log(`${this.name} börjar skriva en fullständig bok utifrån "${output.title}"…`);
 
+    const genreContext = genreLabel ? ` inom kategorin "${genreLabel}"` : "";
     const outlinePrompt =
-      `Skapa ett kapitelupplägg för en ca 30 sidor lång e-bok baserat på ` +
-      `denna idé:\n\nTitel: ${output.title}\nBeskrivning: ${output.body || output.preview}\n\n` +
-      `Ge exakt ${CHAPTER_COUNT} kapitelrubriker på svenska, en per rad, ` +
-      `utan numrering eller extra text - bara rubrikerna. Lägg därefter ` +
-      `till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, ` +
-      `säljande underrubrik till boken (max 12 ord), och en sista rad som ` +
-      `börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord/ämnesord ` +
-      `separerade med kommatecken.`;
+      `Skapa ett upplägg för ett verk${genreContext}, baserat på denna idé:\n\n` +
+      `Titel: ${output.title}\nBeskrivning: ${output.body || output.preview}\n\n` +
+      `Ge exakt ${CHAPTER_COUNT} ${UNIT_WORD_PLURAL} på svenska, en per rad, ` +
+      `utan numrering eller extra text - bara rubrikerna/namnen. Lägg ` +
+      `därefter till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, ` +
+      `säljande underrubrik till hela verket (max 12 ord), och en sista ` +
+      `rad som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord/` +
+      `ämnesord separerade med kommatecken.`;
 
     const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 380);
     const { tags: bookTags, subtitle: bookSubtitle, cleanedText: outlineText } = extractTags(outlineRaw);
@@ -607,35 +707,56 @@ class Agent {
       throw new Error("Kunde inte generera ett kapitelupplägg.");
     }
 
+    // Instruktion för själva innehållet, anpassad efter formatfamilj.
+    const contentInstruction = {
+      prose:
+        "Skriv ca 500-700 ord sammanhängande brödtext på svenska, inga " +
+        "underrubriker inuti texten.",
+      poetry:
+        "Skriv en dikt på svenska (fri vers eller rim, det du bedömer " +
+        "passar bäst) på ca 12-24 rader som fångar temat.",
+      recipe:
+        "Skriv ett fullständigt recept på svenska: en kort introduktion " +
+        "(1-2 meningar), en ingrediensslista (en ingrediens per rad, med " +
+        "mängd), och sedan numrerade tillagningssteg.",
+      script:
+        "Skriv en kort manusscen på svenska i vanligt manusformat: en " +
+        "scenrubrik, en kort scenanvisning i kursiv stil, och dialog med " +
+        "KARAKTÄRSNAMN i versaler följt av repliken på nästa rad.",
+    }[format];
+
+    // Illustrerade verk (kokbok/barnbok/facklitteratur) får bild till fler
+    // enheter (varannan) - annars var tredje, som en trevlig extra touch.
+    const illustrationEvery = illustrated ? 2 : 3;
+
     const chapters = [];
     for (let i = 0; i < chapterTitles.length; i++) {
       this.manager.log(
-        `${this.name} skriver kapitel ${i + 1}/${chapterTitles.length}: "${chapterTitles[i]}"`
+        `${this.name} skriver ${UNIT_WORD} ${i + 1}/${chapterTitles.length}: "${chapterTitles[i]}"`
       );
       const chapterPrompt =
-        `Skriv kapitel ${i + 1} med rubriken "${chapterTitles[i]}" till ` +
-        `e-boken "${output.title}". Skriv ca 500-700 ord sammanhängande ` +
-        `brödtext på svenska, inga underrubriker inuti texten. Avsluta ` +
-        `därefter med en ny rad som börjar med "ILLUSTRATION:" följt av en ` +
-        `kort visuell beskrivning (max 15 ord, gärna på engelska för bästa ` +
-        `resultat i en bildgenerator) av en passande illustration till kapitlet.`;
+        `Skriv ${UNIT_WORD} ${i + 1} med rubriken/namnet "${chapterTitles[i]}" ` +
+        `till verket "${output.title}"${genreContext}. ${contentInstruction} ` +
+        `Avsluta därefter med en ny rad som börjar med "ILLUSTRATION:" följt ` +
+        `av en kort visuell beskrivning (max 15 ord, gärna på engelska för ` +
+        `bästa resultat i en bildgenerator) av en passande bild.`;
 
       const chapterRaw = await callGeminiText(geminiKey, chapterPrompt, 900);
       const illMatch = chapterRaw.match(/ILLUSTRATION:\s*(.+)/i);
       const illustrationIdea = illMatch ? illMatch[1].trim() : null;
       const text = chapterRaw.replace(/ILLUSTRATION:.*$/is, "").trim();
-      // Bara var tredje kapitel får en riktig bild (istället för alla 10) -
-      // annars laddas för många Pollinations-bilder samtidigt och nekas av
-      // deras hastighetsgräns (1 anrop/15 sek för anonyma anrop).
+      // Bara var N:e enhet får en riktig bild - annars laddas för många
+      // Pollinations-bilder samtidigt och nekas av deras hastighetsgräns
+      // (1 anrop/15 sek för anonyma anrop).
       let illustrationUrl = null;
       let illustrationBase64 = null;
-      if (illustrationIdea && i % 3 === 0) {
+      if (illustrationIdea && i % illustrationEvery === 0) {
         illustrationUrl = buildImageUrl(illustrationIdea, { width: 900, height: 560 });
         // Cacha bilden som base64 NU (medan boken skrivs) istället för att
         // hämta den live vid PDF-nedladdning - gör nedladdningen omedelbar
         // och pålitlig. En kort väntan här stör inte, eftersom bokskrivning
         // redan tar ett par minuter totalt.
-        this.manager.log(`${this.name} genererar illustration till kapitel ${i + 1}…`);
+        this.manager.log(`${this.name} genererar illustration till ${UNIT_WORD} ${i + 1}…`);
         illustrationBase64 = await fetchImageAsBase64(illustrationUrl);
         await sleep(3000); // liten marginal mot Pollinations hastighetsgräns
       }
@@ -660,6 +781,9 @@ class Agent {
     const { pages, price } = estimatePriceKr(totalWords);
 
     output.isBook = true;
+    output.genre = genre;
+    output.format = format;
+    output.unitWord = UNIT_WORD;
     output.chapters = chapters;
     output.coverImageUrl = coverImageUrl;
     output.coverImageBase64 = coverImageBase64;
@@ -785,3 +909,4 @@ class Agent {
 }
 
 module.exports = Agent;
+module.exports.GENRE_TAXONOMY = GENRE_TAXONOMY;
