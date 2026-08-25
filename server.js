@@ -90,6 +90,15 @@ app.post("/api/agents/:id/stop", (req, res) => {
   }
 });
 
+app.post("/api/agents/:id/resume", (req, res) => {
+  try {
+    manager.resumeAgent(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.delete("/api/agents/:id", (req, res) => {
   manager.removeAgent(req.params.id);
   res.json({ ok: true });
@@ -178,26 +187,16 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
   });
 });
 
-// Hämtar en bild live som fallback, ENDAST för äldre alster skapade innan
-// bilder cachades som base64 vid skapandetillfället. Nya alster behöver
-// aldrig detta - deras bilder finns redan sparade som base64.
-async function fetchImageBufferFallback(url) {
-  try {
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const arrayBuffer = await resp.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (err) {
-    return null;
-  }
-}
-
-// Slår upp en bild för ett objekt som antingen har cachad base64-data
-// (nya alster - snabbt och pålitligt) eller bara en URL (äldre alster -
-// försöker hämta live, men misslyckas tyst om det inte går).
-async function resolveImageBuffer(base64, url) {
+// Slår upp en bild för ett objekt. Nya alster har redan bilden cachad
+// som base64 (snabbt, pålitligt, ingen nätverksanrop behövs). ÄLDRE
+// alster (skapade innan cachningen infördes) har bara en URL sparad -
+// för dem försöker vi INTE längre hämta live vid PDF-nedladdning, då det
+// gjorde nedladdningen långsam och opålitlig (Pollinations hastighetsgräns
+// + faktisk gentetid per bild kunde göra att hela förfrågan tog för lång
+// tid och avbröts). Sådana äldre alster visar istället illustrationsidén
+// som text i PDF:en - skapa gärna om boken för att få riktiga bilder.
+function resolveImageBuffer(base64) {
   if (base64) return Buffer.from(base64, "base64");
-  if (url) return fetchImageBufferFallback(url);
   return null;
 }
 
@@ -232,7 +231,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
 
   // Omslagssida - HELT EGEN sida, så bilden aldrig kan skymma titeltexten.
   if (output.isBook && (output.coverImageBase64 || output.coverImageUrl)) {
-    const coverBuffer = await resolveImageBuffer(output.coverImageBase64, output.coverImageUrl);
+    const coverBuffer = resolveImageBuffer(output.coverImageBase64);
     if (coverBuffer) {
       try {
         doc.image(coverBuffer, 56, 56, { fit: [483, 680], align: "center", valign: "center" });
@@ -270,7 +269,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
       doc.moveDown();
 
       if (ch.illustrationBase64 || ch.illustrationUrl) {
-        const illBuffer = await resolveImageBuffer(ch.illustrationBase64, ch.illustrationUrl);
+        const illBuffer = resolveImageBuffer(ch.illustrationBase64);
         if (illBuffer) {
           try {
             doc.image(illBuffer, { fit: [460, 280], align: "center" });
@@ -306,7 +305,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
     });
     doc.fillColor("black");
   } else if (output.isImage && (output.imageBase64 || output.imageUrl)) {
-    const imgBuffer = await resolveImageBuffer(output.imageBase64, output.imageUrl);
+    const imgBuffer = resolveImageBuffer(output.imageBase64);
     doc.addPage();
     if (imgBuffer) {
       try {
