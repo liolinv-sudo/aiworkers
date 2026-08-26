@@ -337,7 +337,7 @@ const GENRE_TAXONOMY = {
 // KLIENTEN - den faktiska this.outputs-arrayen på servern behåller all
 // base64-data orört, så PDF-routen fortfarande hittar den.
 function stripBase64ForClient(output) {
-  const { imageBase64, coverImageBase64, chapters, ...rest } = output;
+  const { imageBase64, coverImageBase64, characterImageBase64, chapters, ...rest } = output;
   if (chapters) {
     rest.chapters = chapters.map(({ illustrationBase64, ...ch }) => ch);
   }
@@ -679,7 +679,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
   // kopplad ännu), föreslaget pris och lämpliga marknadsplatser.
   // OBS: detta gör ca 11 API-anrop och används därför bara på begäran,
   // aldrig automatiskt i den vanliga arbetscykeln.
-  async expandToBook(outputId) {
+  async expandToBook(outputId, { chapterCount = null, imageFrequency = null } = {}) {
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) {
       throw new Error("Ingen GEMINI_API_KEY satt - kan inte skriva en fullständig bok.");
@@ -694,23 +694,40 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
 
     const UNIT_WORD = { prose: "kapitel", poetry: "dikt", recipe: "recept", script: "scen" }[format];
     const UNIT_WORD_PLURAL = { prose: "kapitelrubriker", poetry: "dikttitlar", recipe: "receptnamn", script: "scenrubriker" }[format];
-    const CHAPTER_COUNT = format === "recipe" ? 12 : format === "poetry" ? 14 : 10;
+    const CHAPTER_COUNT = chapterCount || (format === "recipe" ? 12 : format === "poetry" ? 14 : 10);
 
     this.manager.log(`${this.name} börjar skriva en fullständig bok utifrån "${output.title}"…`);
 
     const genreContext = genreLabel ? ` inom kategorin "${genreLabel}"` : "";
+
+    // För illustrerade berättande verk (barnbok, skönlitteratur m.fl.) ber
+    // vi om en karaktärsbeskrivning direkt, så samma karaktär kan beskrivas
+    // likadant i varje kapitels bildprompt - annars ritar Pollinations en
+    // helt ny person varje gång, utan koppling mellan bilderna.
+    const includeCharacterSheet = illustrated && format === "prose";
+    const characterInstruction = includeCharacterSheet
+      ? ` Lägg också till en rad som börjar med 'KARAKTÄRER:' följt av en ` +
+        `konkret visuell beskrivning (på engelska, max 25 ord) av ` +
+        `huvudpersonens utseende - ålder, hårfärg/-typ, kläder, distinkta ` +
+        `drag - används för att rita samma karaktär genom hela boken.`
+      : "";
+
     const outlinePrompt =
       `Skapa ett upplägg för ett verk${genreContext}, baserat på denna idé:\n\n` +
       `Titel: ${output.title}\nBeskrivning: ${output.body || output.preview}\n\n` +
       `Ge exakt ${CHAPTER_COUNT} ${UNIT_WORD_PLURAL} på svenska, en per rad, ` +
       `utan numrering eller extra text - bara rubrikerna/namnen. Lägg ` +
       `därefter till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, ` +
-      `säljande underrubrik till hela verket (max 12 ord), och en sista ` +
-      `rad som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska sökord/` +
-      `ämnesord separerade med kommatecken.`;
+      `säljande underrubrik till hela verket (max 12 ord),${characterInstruction} ` +
+      `och en sista rad som börjar med 'TAGGAR:' följt av 3-5 relevanta ` +
+      `svenska sökord/ämnesord separerade med kommatecken.`;
 
-    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 380);
-    const { tags: bookTags, subtitle: bookSubtitle, cleanedText: outlineText } = extractTags(outlineRaw);
+    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 420);
+    const charMatch = outlineRaw.match(/KARAKTÄRER:\s*(.+)/i);
+    const characterDescription = charMatch ? charMatch[1].trim() : null;
+
+    const { tags: bookTags, subtitle: bookSubtitle, cleanedText: outlineTextRaw } = extractTags(outlineRaw);
+    const outlineText = outlineTextRaw.replace(/KARAKTÄRER:.*$/im, "").trim();
     const chapterTitles = outlineText
       .split("\n")
       .map((l) => l.replace(/^[\d.\-\s]+/, "").trim())
@@ -719,6 +736,21 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
 
     if (!chapterTitles.length) {
       throw new Error("Kunde inte generera ett kapitelupplägg.");
+    }
+
+    // Skapa en referensbild av huvudkaraktären, om vi fick en beskrivning.
+    // Visas som en egen "karaktärssida" och används för att hålla
+    // beskrivningen konsekvent i varje kapitels bildprompt.
+    let characterImageUrl = null;
+    let characterImageBase64 = null;
+    if (characterDescription) {
+      this.manager.log(`${this.name} skapar en karaktärsbild för konsekvens genom boken…`);
+      characterImageUrl = buildImageUrl(
+        `character reference portrait, ${characterDescription}, plain simple background, full body`,
+        { width: 800, height: 1000 }
+      );
+      characterImageBase64 = await fetchImageAsBase64(characterImageUrl);
+      await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
     }
 
     // Instruktion för själva innehållet, anpassad efter formatfamilj.
@@ -739,9 +771,25 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
         "KARAKTÄRSNAMN i versaler följt av repliken på nästa rad.",
     }[format];
 
+    // Kategorispecifik ton - viktigast för barnböcker (enklare språk) och
+    // facklitteratur (pedagogisk tydlighet).
+    const categoryOverride =
+      genre?.category === "Barnbok"
+        ? " VIKTIGT: anpassa språket för barn - korta meningar, enkla och " +
+          "konkreta ord, undvik komplicerade bisatser och abstrakta " +
+          "begrepp. Avsluta gärna med en tydlig känsla eller ett litet " +
+          "lärdomsbudskap."
+        : genre?.category === "Facklitteratur"
+          ? " VIKTIGT: var pedagogisk - förklara begrepp tydligt med " +
+            "konkreta exempel eller liknelser, och avsluta avsnittet med " +
+            "en kort sammanfattande poäng."
+          : "";
+
+    const finalContentInstruction = contentInstruction + categoryOverride;
+
     // Illustrerade verk (kokbok/barnbok/facklitteratur) får bild till fler
     // enheter (varannan) - annars var tredje, som en trevlig extra touch.
-    const illustrationEvery = illustrated ? 2 : 3;
+    const illustrationEvery = imageFrequency || (illustrated ? 2 : 3);
 
     // Prosa och manus ska vara EN sammanhängande berättelse med samma
     // karaktärer genom hela verket - inte fristående variationer på samma
@@ -772,13 +820,23 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
           `ihop berättelsen till nästa del).`
         : "";
 
+      const illustrationInstruction = characterDescription
+        ? ` Avsluta därefter med en ny rad som börjar med "ILLUSTRATION:" ` +
+          `följt av en KONKRET beskrivning (max 25 ord, på engelska) av en ` +
+          `SPECIFIK SCEN från just detta avsnitt - vad som konkret händer, ` +
+          `var det utspelar sig, och huvudpersonen med EXAKT detta utseende: ` +
+          `${characterDescription}. Beskriv inte en generisk miljöbild - ` +
+          `beskriv den faktiska händelsen i avsnittet.`
+        : ` Avsluta därefter med en ny rad som börjar med "ILLUSTRATION:" ` +
+          `följt av en KONKRET beskrivning (max 20 ord, på engelska) av en ` +
+          `SPECIFIK SCEN från just detta avsnitt - vad som konkret händer ` +
+          `och var. Beskriv inte en generisk miljöbild - beskriv den ` +
+          `faktiska händelsen i avsnittet.`;
+
       const chapterPrompt =
         `Skriv ${UNIT_WORD} ${i + 1} med rubriken/namnet "${chapterTitles[i]}" ` +
         `till verket "${output.title}"${genreContext}.${continuityContext} ` +
-        `${contentInstruction}${summaryInstruction} Avsluta därefter med en ` +
-        `ny rad som börjar med "ILLUSTRATION:" följt av en kort visuell ` +
-        `beskrivning (max 15 ord, gärna på engelska för bästa resultat i en ` +
-        `bildgenerator) av en passande bild.`;
+        `${finalContentInstruction}${summaryInstruction}${illustrationInstruction}`;
 
       const chapterRaw = await callGeminiText(geminiKey, chapterPrompt, 950);
       const illMatch = chapterRaw.match(/ILLUSTRATION:\s*(.+)/i);
@@ -835,6 +893,9 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     output.chapters = chapters;
     output.coverImageUrl = coverImageUrl;
     output.coverImageBase64 = coverImageBase64;
+    output.characterDescription = characterDescription;
+    output.characterImageUrl = characterImageUrl;
+    output.characterImageBase64 = characterImageBase64;
     output.subtitle = bookSubtitle || output.subtitle;
     output.pages = pages;
     output.suggestedPriceKr = price;
