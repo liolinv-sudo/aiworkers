@@ -291,6 +291,28 @@
   </div>
 </div>
 
+<div id="book-settings-dialog" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Skriv fullständig bok</h3>
+      <button type="button" class="modal-x" data-close-modal="book-settings-dialog" aria-label="Stäng">✕</button>
+    </div>
+    <p class="dialog-sub">Ställ in längd och hur ofta bilder ska genereras (fler bilder tar längre tid).</p>
+    <label>
+      Antal kapitel/enheter (3-20)
+      <input type="number" id="book-chapter-count" min="3" max="20" value="10" />
+    </label>
+    <label>
+      Bild var N:e enhet (1 = varje, 3 = var tredje)
+      <input type="number" id="book-image-frequency" min="1" max="10" value="3" />
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" data-close-modal="book-settings-dialog">Avbryt</button>
+      <button type="button" class="btn btn-primary" id="book-settings-confirm">Skriv boken</button>
+    </div>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="/app.js"></script>
 </body>

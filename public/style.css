@@ -416,6 +416,7 @@ body {
   gap: 10px;
   padding-left: 20px;
   max-height: 70vh;
+  max-height: 70dvh;
   overflow-y: auto;
 }
 
@@ -595,6 +596,7 @@ button:focus-visible, input:focus-visible {
 .outputs-box {
   width: min(560px, 92vw);
   max-height: 80vh;
+  max-height: 80dvh;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -961,6 +963,7 @@ button:focus-visible, input:focus-visible {
   padding: 4px 20px 20px;
   overflow-y: auto;
   max-height: 70vh;
+  max-height: 70dvh;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1028,6 +1031,7 @@ button:focus-visible, input:focus-visible {
   padding: 4px 20px 20px;
   overflow-y: auto;
   max-height: 70vh;
+  max-height: 70dvh;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1159,6 +1163,32 @@ button:focus-visible, input:focus-visible {
   display: block;
 }
 
+.character-sheet {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+.character-portrait {
+  width: 70px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.character-desc {
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+
 .generated-image {
   width: 100%;
   border-radius: 10px;
@@ -1193,6 +1223,7 @@ button:focus-visible, input:focus-visible {
 #bio-dialog .modal-box {
   width: min(480px, 92vw);
   max-height: 80vh;
+  max-height: 80dvh;
   padding: 0;
 }
 

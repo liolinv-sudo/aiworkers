@@ -435,7 +435,7 @@ function bindOutputActions(container) {
     } else if (btn.classList.contains("btn-download-en-txt")) {
       btn.addEventListener("click", () => output && downloadOutputEn(agent, output));
     } else if (btn.classList.contains("btn-expand")) {
-      btn.addEventListener("click", () => expandToBook(agentId, outputId, btn));
+      btn.addEventListener("click", () => openBookSettingsDialog(agentId, outputId, btn));
     } else if (btn.classList.contains("btn-translate")) {
       btn.addEventListener("click", () => translateOutput(agentId, outputId, btn));
     } else if (btn.classList.contains("btn-notes-draft")) {
@@ -527,6 +527,14 @@ function renderOutputItem(o, agentId, showAgentName) {
         ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
         ${renderGenreBadge(o)}
         ${o.coverImageUrl ? `<img class="book-cover lazy-poll-img" data-src="${o.coverImageUrl}" alt="Omslag: ${escapeHtml(o.title)}" />` : ""}
+        ${
+          o.characterImageUrl || o.characterDescription
+            ? `<div class="character-sheet">
+                ${o.characterImageUrl ? `<img class="character-portrait lazy-poll-img" data-src="${o.characterImageUrl}" alt="Huvudkaraktär" />` : ""}
+                ${o.characterDescription ? `<p class="character-desc">${escapeHtml(o.characterDescription)}</p>` : ""}
+              </div>`
+            : ""
+        }
         <div class="book-meta">
           <span class="book-meta-chip">${o.pages || "?"} sidor</span>
           <span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr ?? "?"} kr</span>
@@ -642,12 +650,32 @@ function renderOutputItem(o, agentId, showAgentName) {
   `;
 }
 
-async function expandToBook(agentId, outputId, btnEl) {
+let bookSettingsTarget = null;
+
+function openBookSettingsDialog(agentId, outputId, btnEl) {
+  bookSettingsTarget = { agentId, outputId, btnEl };
+  openModal("book-settings-dialog");
+}
+
+document.getElementById("book-settings-confirm").addEventListener("click", () => {
+  if (!bookSettingsTarget) return;
+  const chapterCount = parseInt(document.getElementById("book-chapter-count").value, 10) || null;
+  const imageFrequency = parseInt(document.getElementById("book-image-frequency").value, 10) || null;
+  const { agentId, outputId, btnEl } = bookSettingsTarget;
+  closeModal("book-settings-dialog");
+  expandToBook(agentId, outputId, btnEl, { chapterCount, imageFrequency });
+});
+
+async function expandToBook(agentId, outputId, btnEl, options = {}) {
   btnEl.disabled = true;
   btnEl.textContent = "Skriver bok… (tar en stund)";
   beginAwaitingAction(300000); // upp till 5 minuter för en hel bok med bilder
   try {
-    const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/expand`, { method: "POST" });
+    const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/expand`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options),
+    });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       alert(data.error || "Kunde inte skapa boken just nu.");
