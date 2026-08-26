@@ -136,10 +136,19 @@ app.post("/api/agents/:id/outputs/:outputId/expand", (req, res) => {
     return res.status(400).json({ error: "Ingen GEMINI_API_KEY satt - kan inte skriva en fullständig bok." });
   }
 
+  // Valfritt: låt användaren välja antal kapitel/sidor och hur ofta bilder
+  // ska genereras, istället för de formatspecifika standardvärdena.
+  const chapterCount = Number.isInteger(req.body?.chapterCount)
+    ? Math.min(20, Math.max(3, req.body.chapterCount))
+    : null;
+  const imageFrequency = Number.isInteger(req.body?.imageFrequency)
+    ? Math.min(10, Math.max(1, req.body.imageFrequency))
+    : null;
+
   // Svara direkt - resultatet strömmar till klienten via socket.io när det är klart.
   res.json({ ok: true, started: true });
 
-  agent.expandToBook(output.id).catch((err) => {
+  agent.expandToBook(output.id, { chapterCount, imageFrequency }).catch((err) => {
     manager.log(`${agent.name} fick ett fel vid bokskrivning: ${err.message}`);
     manager.broadcastAgentUpdate(agent);
   });
@@ -198,6 +207,17 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
 function resolveImageBuffer(base64) {
   if (base64) return Buffer.from(base64, "base64");
   return null;
+}
+
+// PDFKit skapar INTE automatiskt en ny sida om en bild inte får plats i
+// resterande utrymme - då kan bilden hamna utanför sidan eller texten
+// därefter börja skriva över den. Den här hjälparen kollar hur mycket
+// utrymme som är kvar och lägger till en ny sida i förväg om det behövs.
+function ensureSpace(doc, neededHeight) {
+  const remaining = doc.page.height - doc.page.margins.bottom - doc.y;
+  if (remaining < neededHeight) {
+    doc.addPage();
+  }
 }
 
 // Ladda ner ett alster som PDF. Om det är en fullständig bok inkluderas
@@ -261,6 +281,28 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
   }
   doc.fillColor("black");
 
+  // Karaktärssida - en egen sida med referensbild + beskrivning, om boken
+  // har en huvudkaraktär (används annars i varje kapitels bildprompt för
+  // visuell konsekvens, men visas här så läsaren/köparen ser den också).
+  if (output.characterDescription || output.characterImageBase64) {
+    doc.addPage();
+    doc.fontSize(15).text(useEn ? "Main character" : "Huvudkaraktär");
+    doc.moveDown();
+    const charBuffer = resolveImageBuffer(output.characterImageBase64);
+    if (charBuffer) {
+      try {
+        doc.image(charBuffer, { fit: [300, 380], align: "center" });
+        doc.moveDown();
+      } catch (err) {
+        // Hoppa över om bilddatan var ogiltig
+      }
+    }
+    if (output.characterDescription) {
+      doc.fontSize(10).fillColor("#666").text(output.characterDescription, { align: "center" });
+      doc.fillColor("black");
+    }
+  }
+
   if (output.isBook && chapters?.length) {
     for (let i = 0; i < chapters.length; i++) {
       const ch = chapters[i];
@@ -272,6 +314,7 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
         const illBuffer = resolveImageBuffer(ch.illustrationBase64);
         if (illBuffer) {
           try {
+            ensureSpace(doc, 300); // 280 bildhöjd + marginal, annars ny sida
             doc.image(illBuffer, { fit: [460, 280], align: "center" });
             doc.moveDown();
           } catch (err) {
