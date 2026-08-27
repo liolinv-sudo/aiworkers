@@ -65,7 +65,13 @@ app.post("/api/agents/spawn", (req, res) => {
       }
     }
 
-    const agent = manager.spawnAgent({ kind, genre });
+    // imageStyle är bara relevant för bildagenter.
+    const imageStyle =
+      kind === "image" && ["photo", "illustration"].includes(req.body.imageStyle)
+        ? req.body.imageStyle
+        : null;
+
+    const agent = manager.spawnAgent({ kind, genre, imageStyle });
     res.json(agent.toJSON());
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -309,34 +315,37 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
       const ch = chapters[i];
       doc.addPage();
       doc.fontSize(17).text(`${i + 1}. ${ch.title}`);
-      doc.moveDown();
 
       if (ch.illustrationBase64 || ch.illustrationUrl) {
         const illBuffer = resolveImageBuffer(ch.illustrationBase64);
         if (illBuffer) {
           try {
-            ensureSpace(doc, 300); // 280 bildhöjd + marginal, annars ny sida
-            doc.image(illBuffer, { fit: [460, 280], align: "center" });
-            doc.moveDown();
+            // Bilden får en helt egen, tom sida - texten fortsätter sedan
+            // på ÄNNU en ny sida. Det garanterar att bild och text aldrig
+            // kan hamna på samma sida och skymma varandra.
+            doc.addPage();
+            doc.image(illBuffer, { fit: [480, 620], align: "center" });
+            doc.addPage();
           } catch (err) {
             // Hoppa över om bilddatan var ogiltig
           }
         } else if (ch.illustrationIdea) {
+          doc.moveDown();
           doc
             .fontSize(9)
             .fillColor("#888")
             .text(`[Illustration: ${ch.illustrationIdea}]`);
           doc.fillColor("black");
-          doc.moveDown();
         }
       } else if (ch.illustrationIdea) {
+        doc.moveDown();
         doc
           .fontSize(9)
           .fillColor("#888")
           .text(`[Illustration: ${ch.illustrationIdea}]`);
         doc.fillColor("black");
-        doc.moveDown();
       }
+      doc.moveDown();
       doc.fontSize(11).text(ch.text, { align: "left", lineGap: 3 });
     }
 
@@ -353,8 +362,8 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
     doc.addPage();
     if (imgBuffer) {
       try {
-        doc.image(imgBuffer, { fit: [460, 460], align: "center" });
-        doc.moveDown();
+        doc.image(imgBuffer, { fit: [480, 620], align: "center" });
+        doc.addPage(); // beskrivningstexten får en egen, ren sida efter bilden
       } catch (err) {
         // Hoppa över om bilddatan var ogiltig
       }
