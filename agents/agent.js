@@ -131,7 +131,7 @@ async function fetchRealHeadline() {
 
   return null;
 }
-async function callGeminiText(geminiKey, prompt, maxOutputTokens = 400) {
+async function callGeminiText(geminiKey, prompt, maxOutputTokens = 400, retriesLeft = 3) {
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiKey}`,
     {
@@ -144,6 +144,16 @@ async function callGeminiText(geminiKey, prompt, maxOutputTokens = 400) {
     }
   );
   if (!resp.ok) {
+    // 503 (överbelastad) och 429 (för många anrop) är oftast TILLFÄLLIGA -
+    // Google rekommenderar själva att man försöker igen. Backa av med en
+    // kort väntan och försök upp till 3 gånger innan vi ger upp helt, så
+    // att en hel bok/artikel inte spricker på grund av en enstaka
+    // tillfällig kapacitetstopp hos Gemini.
+    if ((resp.status === 503 || resp.status === 429) && retriesLeft > 0) {
+      const waitMs = (4 - retriesLeft) * 5000 + 5000; // 5s, 10s, 15s
+      await sleep(waitMs);
+      return callGeminiText(geminiKey, prompt, maxOutputTokens, retriesLeft - 1);
+    }
     const errText = await resp.text();
     throw new Error(`Gemini ${resp.status}: ${errText.slice(0, 200)}`);
   }
