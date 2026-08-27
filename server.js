@@ -144,11 +144,12 @@ app.post("/api/agents/:id/outputs/:outputId/expand", (req, res) => {
   const imageFrequency = Number.isInteger(req.body?.imageFrequency)
     ? Math.min(10, Math.max(1, req.body.imageFrequency))
     : null;
+  const imageStyle = ["photo", "illustration"].includes(req.body?.imageStyle) ? req.body.imageStyle : null;
 
   // Svara direkt - resultatet strömmar till klienten via socket.io när det är klart.
   res.json({ ok: true, started: true });
 
-  agent.expandToBook(output.id, { chapterCount, imageFrequency }).catch((err) => {
+  agent.expandToBook(output.id, { chapterCount, imageFrequency, imageStyle }).catch((err) => {
     manager.log(`${agent.name} fick ett fel vid bokskrivning: ${err.message}`);
     manager.broadcastAgentUpdate(agent);
   });
