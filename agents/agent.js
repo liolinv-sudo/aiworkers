@@ -249,13 +249,36 @@ function buildImageUrl(prompt, { width = 1024, height = 1024 } = {}) {
 // klickar på "ladda ner PDF". Det gör PDF-nedladdningen omedelbar och
 // pålitlig oavsett Pollinations svarstid, och löser problemet med att
 // bilder saknades eller att nedladdningen tog för lång tid och avbröts.
-async function fetchImageAsBase64(url) {
+async function fetchImageAsBase64(url, retriesLeft = 1) {
   try {
     const resp = await fetch(url);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      if (retriesLeft > 0) {
+        await sleep(8000);
+        return fetchImageAsBase64(url, retriesLeft - 1);
+      }
+      return null;
+    }
+    // Pollinations kan ibland svara med statuskod 200 men skicka ett
+    // textfel (t.ex. vid intern överbelastning) istället för riktig
+    // bilddata. Utan den här kontrollen sparades felmeddelandet som om
+    // det vore en giltig bild, vilket senare gjorde att PDF-inbäddningen
+    // tyst misslyckades (bilden bara saknades, utan synligt fel).
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.startsWith("image/")) {
+      if (retriesLeft > 0) {
+        await sleep(8000);
+        return fetchImageAsBase64(url, retriesLeft - 1);
+      }
+      return null;
+    }
     const arrayBuffer = await resp.arrayBuffer();
     return Buffer.from(arrayBuffer).toString("base64");
   } catch (err) {
+    if (retriesLeft > 0) {
+      await sleep(8000);
+      return fetchImageAsBase64(url, retriesLeft - 1);
+    }
     return null;
   }
 }
@@ -592,9 +615,10 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
 
       const stylePrefix =
         this.imageStyle === "illustration"
-          ? "illustration, hand-drawn art style, "
+          ? "illustration, hand-drawn art style, well-proportioned, "
           : this.imageStyle === "photo"
-            ? "professional photograph, realistic lighting, "
+            ? "professional photograph, realistic lighting, natural " +
+              "well-proportioned anatomy, correct hands and faces, "
             : "";
 
       const imageUrl = buildImageUrl(`${stylePrefix}${description}`);
@@ -744,8 +768,10 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     const resolvedImageStyle = validStyles.includes(imageStyle) ? imageStyle : defaultStyle;
     const stylePrefix =
       resolvedImageStyle === "illustration"
-        ? "children's book illustration, hand-drawn, warm watercolor style, "
-        : "professional photograph, realistic lighting, high quality, ";
+        ? "children's book illustration, hand-drawn, warm watercolor style, " +
+          "clean simple shapes, well-proportioned characters, "
+        : "professional photograph, realistic lighting, high quality, " +
+          "natural well-proportioned anatomy, correct hands and faces, ";
 
     // Enhetlig bildhämtning: stockfoto (Pexels, riktigt foto) om valt och
     // tillgängligt, annars AI-genererad bild (Pollinations) i vald stil.
@@ -768,10 +794,24 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
 
     const genreContext = genreLabel ? ` inom kategorin "${genreLabel}"` : "";
 
-    // För illustrerade berättande verk (barnbok, skönlitteratur m.fl.) ber
-    // vi om en karaktärsbeskrivning direkt, så samma karaktär kan beskrivas
-    // likadant i varje kapitels bildprompt - annars ritar Pollinations en
-    // helt ny person varje gång, utan koppling mellan bilderna.
+    // För PROSA och MANUS - inte poesi/recept som är fristående enheter -
+    // behövs en "berättelsebibel" med etablerade fakta (antal karaktärer,
+    // namn, viktiga detaljer som klädfärger) SÅ FORT det är en samman-
+    // hängande historia, oavsett om boken är illustrerad eller inte.
+    // Utan detta drev fakta iväg mellan kapitel (t.ex. skofärg som ändras,
+    // eller ett påstått 3-personershushåll som plötsligt blir 4 personer).
+    const needsStoryBible = format === "prose" || format === "script";
+    const storyBibleInstruction = needsStoryBible
+      ? ` Lägg också till en rad som börjar med 'FAKTA:' följt av en kort ` +
+        `lista över etablerade fakta som MÅSTE hållas konsekventa genom ` +
+        `hela verket - exakt antal huvudkaraktärer, deras namn, och alla ` +
+        `specifika detaljer som redan antyds i idén (t.ex. klädfärger, ` +
+        `yrken, relationer). Var precis - detta används för att undvika ` +
+        `att fakta ändras mellan avsnitt.`
+      : "";
+
+    // Om verket dessutom är illustrerat, be även om en visuell beskrivning
+    // av huvudpersonen, så Pollinations kan rita samma karaktär varje gång.
     const includeCharacterSheet = illustrated && format === "prose";
     const characterInstruction = includeCharacterSheet
       ? ` Lägg också till en rad som börjar med 'KARAKTÄRER:' följt av en ` +
@@ -786,16 +826,21 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       `Ge exakt ${CHAPTER_COUNT} ${UNIT_WORD_PLURAL} på svenska, en per rad, ` +
       `utan numrering eller extra text - bara rubrikerna/namnen. Lägg ` +
       `därefter till en rad som börjar med 'UNDERRUBRIK:' följt av en kort, ` +
-      `säljande underrubrik till hela verket (max 12 ord),${characterInstruction} ` +
-      `och en sista rad som börjar med 'TAGGAR:' följt av 3-5 relevanta ` +
-      `svenska sökord/ämnesord separerade med kommatecken.`;
+      `säljande underrubrik till hela verket (max 12 ord),${storyBibleInstruction}` +
+      `${characterInstruction} och en sista rad som börjar med 'TAGGAR:' ` +
+      `följt av 3-5 relevanta svenska sökord/ämnesord separerade med kommatecken.`;
 
-    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 420);
+    const outlineRaw = await callGeminiText(geminiKey, outlinePrompt, 450);
     const charMatch = outlineRaw.match(/KARAKTÄRER:\s*(.+)/i);
     const characterDescription = charMatch ? charMatch[1].trim() : null;
+    const bibleMatch = outlineRaw.match(/FAKTA:\s*(.+)/i);
+    const storyBible = bibleMatch ? bibleMatch[1].trim() : null;
 
     const { tags: bookTags, subtitle: bookSubtitle, cleanedText: outlineTextRaw } = extractTags(outlineRaw);
-    const outlineText = outlineTextRaw.replace(/KARAKTÄRER:.*$/im, "").trim();
+    const outlineText = outlineTextRaw
+      .replace(/KARAKTÄRER:.*$/im, "")
+      .replace(/FAKTA:.*$/im, "")
+      .trim();
     const chapterTitles = outlineText
       .split("\n")
       .map((l) => l.replace(/^[\d.\-\s]+/, "").trim())
@@ -814,7 +859,9 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     if (characterDescription) {
       this.manager.log(`${this.name} skapar en karaktärsbild för konsekvens genom boken…`);
       characterImageUrl = buildImageUrl(
-        `${stylePrefix}character reference portrait, ${characterDescription}, plain simple background, full body`,
+        `${stylePrefix}character reference sheet, full body standing pose, ` +
+          `medium shot (not a close-up face), ${characterDescription}, ` +
+          `plain simple background`,
         { width: 800, height: 1000 }
       );
       characterImageBase64 = await fetchImageAsBase64(characterImageUrl);
@@ -873,12 +920,25 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
         `${this.name} skriver ${UNIT_WORD} ${i + 1}/${chapterTitles.length}: "${chapterTitles[i]}"`
       );
 
+      // De etablerade fakta (FAKTA-raden) finns redan från kapitel 1, INTE
+      // bara den löpande sammanfattningen som byggs upp allteftersom -
+      // detta var buggen som lät t.ex. skofärger eller antal karaktärer
+      // driva iväg mellan avsnitt.
+      const factsPart =
+        needsStoryBible && storyBible
+          ? `ETABLERADE FAKTA som MÅSTE hållas exakt konsekventa genom hela ` +
+            `verket (ändra ALDRIG dessa detaljer): ${storyBible}`
+          : "";
+      const historyPart = storySoFar ? `Vad som hänt hittills: ${storySoFar}` : "";
+
       const continuityContext =
-        continuityMatters && storySoFar
-          ? `\n\nDetta är EN sammanhängande berättelse, inte fristående ` +
-            `delar. Vad som hänt hittills: ${storySoFar}\n\nFortsätt med ` +
-            `EXAKT SAMMA huvudkaraktär(er), namn och miljö som ovan - ` +
-            `hitta inte på nya huvudpersoner eller en ny premiss.`
+        continuityMatters && (factsPart || historyPart)
+          ? `\n\nDetta är EN sammanhängande berättelse, inte fristående delar.` +
+            (factsPart ? `\n${factsPart}` : "") +
+            (historyPart ? `\n${historyPart}` : "") +
+            `\n\nFortsätt med EXAKT SAMMA huvudkaraktärer, namn, miljö och ` +
+            `alla etablerade fakta ovan - hitta inte på nya huvudpersoner, ` +
+            `en ny premiss, eller ändra redan nämnda detaljer.`
           : "";
 
       const summaryInstruction = continuityMatters
@@ -963,6 +1023,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     output.coverImageBase64 = coverImageBase64;
     output.coverImageCredit = coverImageCredit;
     output.characterDescription = characterDescription;
+    output.storyBible = storyBible;
     output.imageStyle = resolvedImageStyle;
     output.characterImageUrl = characterImageUrl;
     output.characterImageBase64 = characterImageBase64;
