@@ -679,7 +679,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
   // kopplad ännu), föreslaget pris och lämpliga marknadsplatser.
   // OBS: detta gör ca 11 API-anrop och används därför bara på begäran,
   // aldrig automatiskt i den vanliga arbetscykeln.
-  async expandToBook(outputId, { chapterCount = null, imageFrequency = null } = {}) {
+  async expandToBook(outputId, { chapterCount = null, imageFrequency = null, imageStyle = null } = {}) {
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) {
       throw new Error("Ingen GEMINI_API_KEY satt - kan inte skriva en fullständig bok.");
@@ -691,6 +691,16 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     const format = genre ? GENRE_TAXONOMY[genre.category]?.format || "prose" : "prose";
     const illustrated = !!genre?.illustrated;
     const genreLabel = genre ? (genre.subgenre ? `${genre.category} (${genre.subgenre})` : genre.category) : null;
+
+    // Bildstil: "illustration" (tecknad/målad) eller "photo" (fotorealistisk).
+    // Om inget uttryckligen valts, förvalt baserat på kategori - barnböcker
+    // ska nästan alltid vara tecknade, kokböcker/facklitteratur ofta foton.
+    const defaultStyle = genre?.category === "Barnbok" ? "illustration" : "photo";
+    const resolvedImageStyle = imageStyle === "photo" || imageStyle === "illustration" ? imageStyle : defaultStyle;
+    const stylePrefix =
+      resolvedImageStyle === "illustration"
+        ? "children's book illustration, hand-drawn, warm watercolor style, "
+        : "professional photograph, realistic lighting, high quality, ";
 
     const UNIT_WORD = { prose: "kapitel", poetry: "dikt", recipe: "recept", script: "scen" }[format];
     const UNIT_WORD_PLURAL = { prose: "kapitelrubriker", poetry: "dikttitlar", recipe: "receptnamn", script: "scenrubriker" }[format];
@@ -746,7 +756,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     if (characterDescription) {
       this.manager.log(`${this.name} skapar en karaktärsbild för konsekvens genom boken…`);
       characterImageUrl = buildImageUrl(
-        `character reference portrait, ${characterDescription}, plain simple background, full body`,
+        `${stylePrefix}character reference portrait, ${characterDescription}, plain simple background, full body`,
         { width: 800, height: 1000 }
       );
       characterImageBase64 = await fetchImageAsBase64(characterImageUrl);
@@ -856,7 +866,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       let illustrationUrl = null;
       let illustrationBase64 = null;
       if (illustrationIdea && i % illustrationEvery === 0) {
-        illustrationUrl = buildImageUrl(illustrationIdea, { width: 900, height: 560 });
+        illustrationUrl = buildImageUrl(`${stylePrefix}${illustrationIdea}`, { width: 900, height: 560 });
         // Cacha bilden som base64 NU (medan boken skrivs) istället för att
         // hämta den live vid PDF-nedladdning - gör nedladdningen omedelbar
         // och pålitlig. En kort väntan här stör inte, eftersom bokskrivning
@@ -874,7 +884,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       });
     }
 
-    const coverPrompt = `book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
+    const coverPrompt = `${stylePrefix}book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
     const coverImageUrl = buildImageUrl(coverPrompt, { width: 800, height: 1200 });
     this.manager.log(`${this.name} genererar bokomslag…`);
     await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
@@ -894,6 +904,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     output.coverImageUrl = coverImageUrl;
     output.coverImageBase64 = coverImageBase64;
     output.characterDescription = characterDescription;
+    output.imageStyle = resolvedImageStyle;
     output.characterImageUrl = characterImageUrl;
     output.characterImageBase64 = characterImageBase64;
     output.subtitle = bookSubtitle || output.subtitle;
