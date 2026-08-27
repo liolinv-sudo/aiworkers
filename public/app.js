@@ -538,6 +538,7 @@ function renderOutputItem(o, agentId, showAgentName) {
         <div class="book-meta">
           <span class="book-meta-chip">${o.pages || "?"} sidor</span>
           <span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr ?? "?"} kr</span>
+          ${o.imageStyle ? `<span class="book-meta-chip">${o.imageStyle === "illustration" ? "🖌 Illustration" : "📷 Foto"}</span>` : ""}
           ${hasEn ? `<span class="book-meta-chip">🇬🇧 Engelsk version klar</span>` : ""}
         </div>
         ${renderTags(o.tags)}
@@ -661,9 +662,10 @@ document.getElementById("book-settings-confirm").addEventListener("click", () =>
   if (!bookSettingsTarget) return;
   const chapterCount = parseInt(document.getElementById("book-chapter-count").value, 10) || null;
   const imageFrequency = parseInt(document.getElementById("book-image-frequency").value, 10) || null;
+  const imageStyle = document.getElementById("book-image-style").value || null;
   const { agentId, outputId, btnEl } = bookSettingsTarget;
   closeModal("book-settings-dialog");
-  expandToBook(agentId, outputId, btnEl, { chapterCount, imageFrequency });
+  expandToBook(agentId, outputId, btnEl, { chapterCount, imageFrequency, imageStyle });
 });
 
 async function expandToBook(agentId, outputId, btnEl, options = {}) {
