@@ -146,7 +146,9 @@ function renderAgent(agent) {
   card.querySelector(".agent-name").onclick = () => openOutputsDialog(agent.id);
   const genreLabel = agent.genre
     ? ` · ${agent.genre.category}${agent.genre.subgenre ? " (" + agent.genre.subgenre + ")" : ""}`
-    : "";
+    : agent.imageStyle
+      ? ` · ${agent.imageStyle === "illustration" ? "Illustration" : "Foto"}`
+      : "";
   card.querySelector(".agent-status").textContent = statusLabel(agent.status) + genreLabel;
   card.querySelector(".agent-latest").onclick = () => openOutputsDialog(agent.id);
 
@@ -263,11 +265,11 @@ function escapeHtml(str) {
 
 // ---- Actions ----
 
-async function spawnAgent(kind, genre = null) {
+async function spawnAgent(kind, genre = null, imageStyle = null) {
   const res = await fetch("/api/agents/spawn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, genre }),
+    body: JSON.stringify({ kind, genre, imageStyle }),
   });
   if (!res.ok) {
     const { error } = await res.json();
@@ -527,6 +529,7 @@ function renderOutputItem(o, agentId, showAgentName) {
         ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
         ${renderGenreBadge(o)}
         ${o.coverImageUrl ? `<img class="book-cover lazy-poll-img" data-src="${o.coverImageUrl}" alt="Omslag: ${escapeHtml(o.title)}" />` : ""}
+        ${o.coverImageCredit ? `<p class="photo-credit">📷 Foto: ${escapeHtml(o.coverImageCredit)} (Pexels)</p>` : ""}
         ${
           o.characterImageUrl || o.characterDescription
             ? `<div class="character-sheet">
@@ -852,7 +855,13 @@ document.getElementById("genre-confirm").addEventListener("click", () => {
   closeModal("genre-dialog");
 });
 
-document.getElementById("spawn-image").addEventListener("click", () => spawnAgent("image"));
+document.getElementById("spawn-image").addEventListener("click", () => openModal("image-style-dialog"));
+
+document.getElementById("image-style-confirm").addEventListener("click", () => {
+  const imageStyle = document.getElementById("image-style-select").value || null;
+  closeModal("image-style-dialog");
+  spawnAgent("image", null, imageStyle);
+});
 document.getElementById("spawn-journalist-feature").addEventListener("click", () => spawnAgent("journalist_feature"));
 document.getElementById("spawn-journalist-column").addEventListener("click", () => spawnAgent("journalist_column"));
 
