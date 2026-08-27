@@ -25,11 +25,11 @@ class AgentManager {
 
   // ---- Agentlivscykel ----
 
-  spawnAgent({ parentId = null, kind = "text", genre = null } = {}) {
+  spawnAgent({ parentId = null, kind = "text", genre = null, imageStyle = null } = {}) {
     if (this.agents.size >= MAX_AGENTS) {
       throw new Error(`Max antal agenter (${MAX_AGENTS}) uppnått.`);
     }
-    const agent = new Agent({ parentId, manager: this, kind, genre });
+    const agent = new Agent({ parentId, manager: this, kind, genre, imageStyle });
     this.agents.set(agent.id, agent);
     agent.start();
     this.log(
@@ -48,7 +48,7 @@ class AgentManager {
   reproduce(agentId) {
     const parent = this.agents.get(agentId);
     if (!parent) throw new Error("Agent hittades inte.");
-    return this.spawnAgent({ parentId: agentId, kind: parent.kind, genre: parent.genre });
+    return this.spawnAgent({ parentId: agentId, kind: parent.kind, genre: parent.genre, imageStyle: parent.imageStyle });
   }
 
   stopAgent(agentId) {

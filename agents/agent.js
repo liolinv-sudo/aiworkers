@@ -254,6 +254,30 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Hämtar ett RIKTIGT stockfoto (inte AI-genererat) från Pexels, gratis och
+// nyckelbaserat (200 anrop/timme, ingen vattenstämpel, fri kommersiell
+// användning). Returnerar {url, base64, photographer} eller null om inget
+// hittades/nyckel saknas.
+async function fetchStockPhoto(query) {
+  const pexelsKey = process.env.PEXELS_API_KEY;
+  if (!pexelsKey) return null;
+  try {
+    const resp = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`,
+      { headers: { Authorization: pexelsKey } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const photo = data.photos?.[0];
+    if (!photo) return null;
+    const url = photo.src.large;
+    const base64 = await fetchImageAsBase64(url);
+    return { url, base64, photographer: photo.photographer };
+  } catch (err) {
+    return null;
+  }
+}
+
 // Grov tumregel för bildpris, baserad på vanlig prissättning för digital
 // konst på Etsy (8-15 dollar/72-160 kr för en "quality print"; 2-3 dollar
 // signalerar enligt säljarguider "disposability"). Sätts i den nedre delen
@@ -345,12 +369,13 @@ function stripBase64ForClient(output) {
 }
 
 class Agent {
-  constructor({ parentId = null, manager, kind = "text", genre = null }) {
+  constructor({ parentId = null, manager, kind = "text", genre = null, imageStyle = null }) {
     this.id = nanoid(8);
     this.parentId = parentId;
     this.manager = manager;
     this.kind = kind; // "text" | "image" | "journalist_feature" | "journalist_column"
     this.genre = genre; // { category, subgenre, illustrated } | null (null = generisk textagent)
+    this.imageStyle = imageStyle; // "photo" | "illustration" | null (bara relevant för kind "image")
     this.name =
       NAME_POOL[Math.floor(Math.random() * NAME_POOL.length)] +
       "-" +
@@ -370,6 +395,7 @@ class Agent {
       parentId: this.parentId,
       kind: this.kind,
       genre: this.genre,
+      imageStyle: this.imageStyle,
       name: this.name,
       status: this.status,
       createdAt: this.createdAt,
@@ -389,6 +415,7 @@ class Agent {
     this.parentId = saved.parentId ?? this.parentId;
     this.kind = saved.kind || this.kind;
     this.genre = saved.genre ?? this.genre;
+    this.imageStyle = saved.imageStyle ?? this.imageStyle;
     this.name = saved.name || this.name;
     this.createdAt = saved.createdAt || this.createdAt;
     this.bio = saved.bio || this.bio;
@@ -553,7 +580,14 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
         subtitle = "";
       }
 
-      const imageUrl = buildImageUrl(description);
+      const stylePrefix =
+        this.imageStyle === "illustration"
+          ? "illustration, hand-drawn art style, "
+          : this.imageStyle === "photo"
+            ? "professional photograph, realistic lighting, "
+            : "";
+
+      const imageUrl = buildImageUrl(`${stylePrefix}${description}`);
       // Cacha bilden som base64 direkt, så PDF-nedladdning senare blir
       // omedelbar istället för att bero på en live-hämtning från Pollinations.
       const imageBase64 = await fetchImageAsBase64(imageUrl);
@@ -692,15 +726,29 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     const illustrated = !!genre?.illustrated;
     const genreLabel = genre ? (genre.subgenre ? `${genre.category} (${genre.subgenre})` : genre.category) : null;
 
-    // Bildstil: "illustration" (tecknad/målad) eller "photo" (fotorealistisk).
-    // Om inget uttryckligen valts, förvalt baserat på kategori - barnböcker
-    // ska nästan alltid vara tecknade, kokböcker/facklitteratur ofta foton.
+    // Bildstil: "illustration" (tecknad/målad), "photo" (AI-genererat
+    // fotorealistiskt), eller "stockphoto" (RIKTIGT foto från Pexels, inte
+    // AI-genererat - kräver PEXELS_API_KEY, faller annars tillbaka på "photo").
     const defaultStyle = genre?.category === "Barnbok" ? "illustration" : "photo";
-    const resolvedImageStyle = imageStyle === "photo" || imageStyle === "illustration" ? imageStyle : defaultStyle;
+    const validStyles = ["photo", "illustration", "stockphoto"];
+    const resolvedImageStyle = validStyles.includes(imageStyle) ? imageStyle : defaultStyle;
     const stylePrefix =
       resolvedImageStyle === "illustration"
         ? "children's book illustration, hand-drawn, warm watercolor style, "
         : "professional photograph, realistic lighting, high quality, ";
+
+    // Enhetlig bildhämtning: stockfoto (Pexels, riktigt foto) om valt och
+    // tillgängligt, annars AI-genererad bild (Pollinations) i vald stil.
+    const resolveBookImage = async (description, dims) => {
+      if (resolvedImageStyle === "stockphoto") {
+        const stock = await fetchStockPhoto(description);
+        if (stock) return { url: stock.url, base64: stock.base64, credit: stock.photographer };
+      }
+      const url = buildImageUrl(`${stylePrefix}${description}`, dims);
+      const base64 = await fetchImageAsBase64(url);
+      await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
+      return { url, base64, credit: null };
+    };
 
     const UNIT_WORD = { prose: "kapitel", poetry: "dikt", recipe: "recept", script: "scen" }[format];
     const UNIT_WORD_PLURAL = { prose: "kapitelrubriker", poetry: "dikttitlar", recipe: "receptnamn", script: "scenrubriker" }[format];
@@ -865,30 +913,30 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       // (1 anrop/15 sek för anonyma anrop).
       let illustrationUrl = null;
       let illustrationBase64 = null;
+      let illustrationCredit = null;
       if (illustrationIdea && i % illustrationEvery === 0) {
-        illustrationUrl = buildImageUrl(`${stylePrefix}${illustrationIdea}`, { width: 900, height: 560 });
-        // Cacha bilden som base64 NU (medan boken skrivs) istället för att
-        // hämta den live vid PDF-nedladdning - gör nedladdningen omedelbar
-        // och pålitlig. En kort väntan här stör inte, eftersom bokskrivning
-        // redan tar ett par minuter totalt.
         this.manager.log(`${this.name} genererar illustration till ${UNIT_WORD} ${i + 1}…`);
-        illustrationBase64 = await fetchImageAsBase64(illustrationUrl);
-        await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
+        const img = await resolveBookImage(illustrationIdea, { width: 900, height: 560 });
+        illustrationUrl = img.url;
+        illustrationBase64 = img.base64;
+        illustrationCredit = img.credit;
       }
       chapters.push({
         title: chapterTitles[i],
         text,
         illustrationIdea,
         illustrationUrl,
+        illustrationCredit,
         illustrationBase64,
       });
     }
 
-    const coverPrompt = `${stylePrefix}book cover art, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
-    const coverImageUrl = buildImageUrl(coverPrompt, { width: 800, height: 1200 });
+    const coverDescription = `book cover, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
     this.manager.log(`${this.name} genererar bokomslag…`);
-    await sleep(16000); // säker marginal över Pollinations 15-sek-gräns
-    const coverImageBase64 = await fetchImageAsBase64(coverImageUrl);
+    const coverImg = await resolveBookImage(coverDescription, { width: 800, height: 1200 });
+    const coverImageUrl = coverImg.url;
+    const coverImageBase64 = coverImg.base64;
+    const coverImageCredit = coverImg.credit;
 
     const totalWords = chapters.reduce(
       (sum, c) => sum + c.text.split(/\s+/).filter(Boolean).length,
@@ -903,6 +951,7 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     output.chapters = chapters;
     output.coverImageUrl = coverImageUrl;
     output.coverImageBase64 = coverImageBase64;
+    output.coverImageCredit = coverImageCredit;
     output.characterDescription = characterDescription;
     output.imageStyle = resolvedImageStyle;
     output.characterImageUrl = characterImageUrl;
