@@ -36,10 +36,14 @@ const cardEls = new Map(); // id -> DOM element
 
 function openModal(id) {
   document.getElementById(id).classList.add("open");
+  document.body.classList.add("modal-locked");
 }
 
 function closeModal(id) {
   document.getElementById(id).classList.remove("open");
+  // Lås bara upp bakgrunden om ingen ANNAN modal fortfarande är öppen.
+  const anyOpen = document.querySelector(".modal-overlay.open");
+  if (!anyOpen) document.body.classList.remove("modal-locked");
 }
 
 function isModalOpen(id) {
@@ -129,6 +133,19 @@ function krFromCents(cents) {
 
 function renderAgent(agent) {
   agents.set(agent.id, agent);
+  updateHiddenCount();
+
+  // Dolda agenter ska inte synas i huvudgriden alls - men de finns kvar i
+  // "agents"-mapen så biblioteket fortfarande visar all deras historik.
+  if (agent.archived) {
+    const existingCard = cardEls.get(agent.id);
+    if (existingCard) {
+      existingCard.remove();
+      cardEls.delete(agent.id);
+    }
+    if (isModalOpen("hidden-agents-dialog")) renderHiddenAgentsList();
+    return;
+  }
 
   let card = cardEls.get(agent.id);
   if (!card) {
@@ -137,6 +154,7 @@ function renderAgent(agent) {
     card.querySelector(".btn-reproduce").addEventListener("click", () => reproduce(agent.id));
     card.querySelector(".btn-sale").addEventListener("click", () => openSaleDialog(agent.id));
     card.querySelector(".btn-info").addEventListener("click", () => openBioDialog(agent.id));
+    card.querySelector(".btn-remove").addEventListener("click", () => archiveAgentWithConfirm(agent.id, agent.name));
     grid.appendChild(card);
     cardEls.set(agent.id, card);
   }
@@ -283,6 +301,33 @@ async function reproduce(agentId) {
     const { error } = await res.json();
     alert(error || "Kunde inte föröka agenten.");
   }
+}
+
+async function archiveAgentWithConfirm(agentId, agentName) {
+  const confirmed = confirm(
+    `Dölj ${agentName} från huvudsidan? Den pausas och historiken finns ` +
+    `kvar orört i biblioteket - du kan visa den igen när som helst via ` +
+    `"👁 Dolda agenter"-knappen.`
+  );
+  if (!confirmed) return;
+
+  await fetch(`/api/agents/${agentId}/archive`, { method: "POST" });
+  const card = cardEls.get(agentId);
+  if (card) card.remove();
+  cardEls.delete(agentId);
+  updateHiddenCount();
+}
+
+async function unarchiveAgent(agentId) {
+  await fetch(`/api/agents/${agentId}/unarchive`, { method: "POST" });
+  // Kortet återskapas automatiskt via nästa "agent:update"-händelse.
+  renderHiddenAgentsList();
+}
+
+function updateHiddenCount() {
+  const count = [...agents.values()].filter((a) => a.archived).length;
+  const btn = document.getElementById("open-hidden-agents");
+  if (btn) btn.textContent = `👁 Dolda agenter (${count})`;
 }
 
 async function stopAgent(agentId) {
@@ -976,6 +1021,39 @@ librarySortSelect.addEventListener("change", () => {
 document.getElementById("open-library").addEventListener("click", openLibraryDialog);
 document.getElementById("open-subscribe").addEventListener("click", () => openModal("subscribe-dialog"));
 document.getElementById("open-market").addEventListener("click", () => openModal("market-dialog"));
+
+document.getElementById("open-hidden-agents").addEventListener("click", () => {
+  renderHiddenAgentsList();
+  openModal("hidden-agents-dialog");
+});
+
+function renderHiddenAgentsList() {
+  const list = document.getElementById("hidden-agents-list");
+  const hidden = [...agents.values()].filter((a) => a.archived);
+
+  if (!hidden.length) {
+    list.innerHTML = `<p class="outputs-empty">Inga dolda agenter just nu.</p>`;
+    return;
+  }
+
+  list.innerHTML = hidden
+    .map(
+      (agent) => `
+      <article class="output-item hidden-agent-item">
+        <div class="output-item-head">
+          <h4>${escapeHtml(agent.name)}</h4>
+          <span class="output-time">${agent.outputCount ?? agent.outputs.length} alster</span>
+        </div>
+        <button type="button" class="btn btn-tiny btn-primary" data-unarchive-id="${agent.id}">👁 Visa på huvudsidan igen</button>
+      </article>
+    `
+    )
+    .join("");
+
+  list.querySelectorAll("[data-unarchive-id]").forEach((btn) => {
+    btn.addEventListener("click", () => unarchiveAgent(btn.dataset.unarchiveId));
+  });
+}
 
 document.querySelectorAll(".lib-filter-btn").forEach((btn) => {
   btn.addEventListener("click", () => {

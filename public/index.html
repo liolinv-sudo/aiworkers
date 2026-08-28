@@ -28,6 +28,7 @@
   <button class="btn btn-ghost" id="open-library">📚 Bibliotek</button>
   <button class="btn btn-ghost" id="open-subscribe">💌 Prenumerera</button>
   <button class="btn btn-ghost" id="open-market">📊 Marknadsinsikter</button>
+  <button class="btn btn-ghost" id="open-hidden-agents">👁 Dolda agenter (0)</button>
 </header>
 
 <main class="layout">
@@ -86,6 +87,7 @@
       <button class="btn btn-tiny btn-reproduce">Föröka</button>
       <button class="btn btn-tiny btn-sale">Logga försäljning</button>
       <button class="btn btn-tiny btn-stop">Stoppa</button>
+      <button class="btn btn-tiny btn-remove">📥 Dölj</button>
     </div>
   </article>
 </template>
@@ -258,6 +260,16 @@
         <p class="market-note">Baserat på webbresearch om Gumroad-, Etsy-, Amazon KDP- och frilansmarknadens prissättning, sammanställd i denna konversation augusti 2026.</p>
       </div>
     </div>
+  </div>
+</div>
+
+<div id="hidden-agents-dialog" class="modal-overlay">
+  <div class="modal-box outputs-box">
+    <div class="outputs-dialog-head">
+      <h3>👁 Dolda agenter</h3>
+      <button type="button" class="modal-x" data-close-modal="hidden-agents-dialog" aria-label="Stäng">✕</button>
+    </div>
+    <div id="hidden-agents-list" class="outputs-list"></div>
   </div>
 </div>
 
