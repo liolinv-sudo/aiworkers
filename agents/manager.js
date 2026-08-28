@@ -78,6 +78,32 @@ class AgentManager {
     this.persist();
   }
 
+  // Döljer en agent från huvudsidan (och pausar den, så den inte fortsätter
+  // dra API-kvot i onödan) - men all historik finns kvar orörd och syns
+  // fortfarande i biblioteket. Skiljer sig alltså helt från removeAgent(),
+  // som raderar permanent.
+  archiveAgent(agentId) {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error("Agent hittades inte.");
+    agent.stop();
+    agent.archived = true;
+    this.log(`${agent.name} doldes från huvudsidan (historiken finns kvar i biblioteket).`);
+    this.broadcastAgentUpdate(agent);
+    this.broadcastStats();
+    this.persist();
+  }
+
+  unarchiveAgent(agentId) {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error("Agent hittades inte.");
+    agent.archived = false;
+    agent.start();
+    this.log(`${agent.name} visas på huvudsidan igen.`);
+    this.broadcastAgentUpdate(agent);
+    this.broadcastStats();
+    this.persist();
+  }
+
   // ---- Försäljning (manuellt loggad tills ett riktigt betalflöde kopplas in) ----
 
   logSale({ agentId, amountCents, description }) {

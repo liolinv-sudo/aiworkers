@@ -414,6 +414,7 @@ class Agent {
       "-" +
       this.id.slice(0, 4);
     this.status = "idle"; // idle | working | error | stopped
+    this.archived = false; // dold från huvudsidan, men historiken finns kvar i biblioteket
     this.createdAt = new Date().toISOString();
     this.bio = generateBio();
     this.outputs = []; // { id, title, preview, createdAt }
@@ -431,6 +432,7 @@ class Agent {
       imageStyle: this.imageStyle,
       name: this.name,
       status: this.status,
+      archived: this.archived,
       createdAt: this.createdAt,
       bio: this.bio,
       outputs: this.outputs.map(stripBase64ForClient), // se kommentar nedan
@@ -455,9 +457,10 @@ class Agent {
     this.outputs = saved.outputs || [];
     this.earningsCents = saved.earningsCents || 0;
     this.cyclesRun = saved.cyclesRun || 0;
-    // Om agenten var stoppad innan omstarten, håll den stoppad -
-    // annars startar start() om den normalt igen.
-    this.status = saved.status === "stopped" ? "stopped" : "idle";
+    this.archived = !!saved.archived;
+    // Om agenten var stoppad (eller dold) innan omstarten, håll den
+    // stoppad - annars startar start() om den normalt igen.
+    this.status = saved.status === "stopped" || saved.archived ? "stopped" : "idle";
   }
 
   start(intervalMs = 90000) {
@@ -535,7 +538,8 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
           ? buildGenreIdeaPrompt(this.genre, recentTitles)
           : "Ge mig en kort, säljbar produktidé (t.ex. en novell-pitch, " +
             "ett blogginlägg, eller copywriting-exempel) som skulle kunna " +
-            "säljas online. Svara med en titel på första raden och en kort " +
+            "säljas online. Skriv på korrekt, flytande och naturlig " +
+            "svenska. Svara med en titel på första raden och en kort " +
             "beskrivning (max 3 meningar) på raderna efter. Lägg också till " +
             "en rad som börjar med 'UNDERRUBRIK:' följt av en kort, säljande " +
             "underrubrik (max 12 ord), och en rad som börjar med 'TAGGAR:' " +
@@ -859,9 +863,9 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     if (characterDescription) {
       this.manager.log(`${this.name} skapar en karaktärsbild för konsekvens genom boken…`);
       characterImageUrl = buildImageUrl(
-        `${stylePrefix}character reference sheet, full body standing pose, ` +
-          `medium shot (not a close-up face), ${characterDescription}, ` +
-          `plain simple background`,
+        `${stylePrefix}single full body illustration of one character, ` +
+          `standing pose, medium shot, ${characterDescription}, plain ` +
+          `simple background, single image, one consistent character only`,
         { width: 800, height: 1000 }
       );
       characterImageBase64 = await fetchImageAsBase64(characterImageUrl);
@@ -900,7 +904,12 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
             "en kort sammanfattande poäng."
           : "";
 
-    const finalContentInstruction = contentInstruction + categoryOverride;
+    const languageQualityInstruction =
+      " Skriv på korrekt, flytande och naturlig svenska - kontrollera " +
+      "grammatik, stavning och ordböjning noga, och undvik onaturliga " +
+      "eller direktöversatta formuleringar.";
+
+    const finalContentInstruction = contentInstruction + categoryOverride + languageQualityInstruction;
 
     // Illustrerade verk (kokbok/barnbok/facklitteratur) får bild till fler
     // enheter (varannan) - annars var tredje, som en trevlig extra touch.
@@ -986,7 +995,15 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       let illustrationCredit = null;
       if (illustrationIdea && i % illustrationEvery === 0) {
         this.manager.log(`${this.name} genererar illustration till ${UNIT_WORD} ${i + 1}…`);
-        const img = await resolveBookImage(illustrationIdea, { width: 900, height: 560 });
+        // Gemini kan parafrasera bort exakta klädesdetaljer (t.ex. "randig
+        // tröja" blir plötsligt "vit tröja") när den skriver scenbeskriv-
+        // ningen. Lägg därför till den EXAKTA, ordagranna karaktärs-
+        // beskrivningen sist i prompten programmatiskt, istället för att
+        // förlita oss på att Gemini återger den korrekt varje gång.
+        const finalPrompt = characterDescription
+          ? `${illustrationIdea}. Character appearance (must match exactly): ${characterDescription}`
+          : illustrationIdea;
+        const img = await resolveBookImage(finalPrompt, { width: 900, height: 560 });
         illustrationUrl = img.url;
         illustrationBase64 = img.base64;
         illustrationCredit = img.credit;
@@ -1001,7 +1018,10 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       });
     }
 
-    const coverDescription = `book cover, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}`;
+    const coverDescription =
+      `book cover, ${output.title}: ${(output.body || output.preview || "").slice(0, 150)}` +
+      (characterDescription ? `. Main character: ${characterDescription}` : "") +
+      (storyBible ? `. Key details: ${storyBible.slice(0, 150)}` : "");
     this.manager.log(`${this.name} genererar bokomslag…`);
     const coverImg = await resolveBookImage(coverDescription, { width: 800, height: 1200 });
     const coverImageUrl = coverImg.url;
