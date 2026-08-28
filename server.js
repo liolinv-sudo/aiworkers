@@ -110,6 +110,26 @@ app.delete("/api/agents/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Döljer en agent från huvudsidan utan att radera historiken (den syns
+// fortfarande i biblioteket). Skiljer sig från DELETE ovan.
+app.post("/api/agents/:id/archive", (req, res) => {
+  try {
+    manager.archiveAgent(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post("/api/agents/:id/unarchive", (req, res) => {
+  try {
+    manager.unarchiveAgent(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Manuell försäljningslogg. Detta ersätter ett automatiskt betalflöde
 // tills du kopplar in en riktig betaltjänst (t.ex. Stripe) och en
 // marknadsplats/butik med korrekt registrering.
@@ -299,12 +319,14 @@ app.get("/api/agents/:id/outputs/:outputId/pdf", async (req, res) => {
     if (charBuffer) {
       try {
         doc.image(charBuffer, { fit: [300, 380], align: "center" });
-        doc.moveDown();
       } catch (err) {
         // Hoppa över om bilddatan var ogiltig
       }
     }
     if (output.characterDescription) {
+      // Egen sida för beskrivningstexten - annars kan den hamna ovanpå
+      // bilden om pdfkit inte räknar ut bildens höjd exakt rätt.
+      doc.addPage();
       doc.fontSize(10).fillColor("#666").text(output.characterDescription, { align: "center" });
       doc.fillColor("black");
     }
