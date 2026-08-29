@@ -928,21 +928,17 @@ function openLibraryDialog() {
 }
 
 let libraryGenreFilter = "";
-let libraryGroupBy = "agent";
 let librarySort = "new";
 const libraryGenreSelect = document.getElementById("library-genre-filter");
-const libraryGroupBySelect = document.getElementById("library-group-by");
 const librarySortSelect = document.getElementById("library-sort");
 
 function renderLibrary() {
   // Fyll genre-dropdownen med de kategorier som faktiskt förekommer bland
   // alla agenters alster just nu.
   const seenGenres = new Set();
-  const flatItems = [];
   for (const agent of agents.values()) {
     for (const o of agent.outputs) {
       if (o.genre?.category) seenGenres.add(o.genre.category);
-      flatItems.push({ agent, output: o });
     }
   }
   const currentGenreValue = libraryGenreSelect.value;
@@ -952,64 +948,59 @@ function renderLibrary() {
   libraryGenreSelect.value = seenGenres.has(currentGenreValue) ? currentGenreValue : "";
   libraryGenreFilter = libraryGenreSelect.value;
 
-  // Filtrera på typ och genre
-  let filtered = flatItems.filter(({ output }) => {
-    if (libraryFilter !== "all" && classifyOutput(output) !== libraryFilter) return false;
-    if (libraryGenreFilter && output.genre?.category !== libraryGenreFilter) return false;
-    return true;
-  });
+  // Bygg EN liten ruta per agent - inte en tung lista med alla fullständiga
+  // alster utskrivna. Klick på en ruta öppnar samma historikvy som redan
+  // används från huvudsidan, där scrollningen redan fungerar.
+  const tiles = [];
+  for (const agent of agents.values()) {
+    const matching = agent.outputs.filter((o) => {
+      if (libraryFilter !== "all" && classifyOutput(o) !== libraryFilter) return false;
+      if (libraryGenreFilter && o.genre?.category !== libraryGenreFilter) return false;
+      return true;
+    });
+    if (!matching.length) continue;
 
-  if (!filtered.length) {
+    const newest = matching.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b));
+    tiles.push({ agent, matching, newest });
+  }
+
+  if (!tiles.length) {
     libraryList.innerHTML = `<p class="outputs-empty">Inget att visa i den här kategorin ännu.</p>`;
     return;
   }
 
-  // Sortera (inom varje grupp sorteras det också, men detta avgör ordningen totalt)
-  filtered.sort((a, b) => {
-    const diff = new Date(a.output.createdAt) - new Date(b.output.createdAt);
+  tiles.sort((a, b) => {
+    const diff = new Date(a.newest.createdAt) - new Date(b.newest.createdAt);
     return librarySort === "new" ? -diff : diff;
   });
 
-  // Gruppera antingen per agent eller per kategori
-  const groups = new Map(); // groupLabel -> items[]
-  for (const item of filtered) {
-    const label =
-      libraryGroupBy === "category"
-        ? item.output.genre?.category || "Utan kategori"
-        : item.agent.name;
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label).push(item);
-  }
+  libraryList.innerHTML = `
+    <div class="library-tile-grid">
+      ${tiles
+        .map(
+          ({ agent, matching, newest }) => `
+        <button type="button" class="library-tile" data-agent-id="${agent.id}">
+          <span class="library-tile-name">${escapeHtml(agent.name)}</span>
+          ${renderGenreBadge(newest) || (agent.kind !== "text" ? `<span class="genre-badge">${escapeHtml(agent.kind)}</span>` : "")}
+          <span class="library-tile-count">${matching.length} alster</span>
+          <span class="library-tile-latest">${escapeHtml(newest.title)}</span>
+        </button>
+      `
+        )
+        .join("")}
+    </div>
+  `;
 
-  const sortedLabels = [...groups.keys()].sort((a, b) => a.localeCompare(b));
-
-  libraryList.innerHTML = sortedLabels
-    .map((label) => {
-      const items = groups.get(label);
-      return `
-        <details class="library-agent-section" open>
-          <summary>
-            <span class="lib-agent-name">${escapeHtml(label)}</span>
-            <span class="lib-agent-count">${items.length} alster</span>
-          </summary>
-          <div class="library-agent-items library-grid">
-            ${items.map(({ agent, output }) => renderOutputItem(output, agent.id, libraryGroupBy === "category")).join("")}
-          </div>
-        </details>
-      `;
-    })
-    .join("");
-  bindOutputActions(libraryList);
-  queuePollinationsImages(libraryList);
+  libraryList.querySelectorAll(".library-tile").forEach((tile) => {
+    tile.addEventListener("click", () => {
+      closeModal("library-dialog");
+      openOutputsDialog(tile.dataset.agentId);
+    });
+  });
 }
 
 libraryGenreSelect.addEventListener("change", () => {
   libraryGenreFilter = libraryGenreSelect.value;
-  renderLibrary();
-});
-
-libraryGroupBySelect.addEventListener("change", () => {
-  libraryGroupBy = libraryGroupBySelect.value;
   renderLibrary();
 });
 
