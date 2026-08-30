@@ -46,7 +46,7 @@ app.get("/api/config", (req, res) => {
 
 app.post("/api/agents/spawn", (req, res) => {
   try {
-    const allowedKinds = ["text", "image", "journalist_feature", "journalist_column"];
+    const allowedKinds = ["text", "image", "journalist_feature", "journalist_column", "video"];
     const kind = allowedKinds.includes(req.body.kind) ? req.body.kind : "text";
 
     // Genre är bara relevant (och valideras) för textagenter.
@@ -219,6 +219,28 @@ app.post("/api/agents/:id/outputs/:outputId/notes-draft", (req, res) => {
 
   agent.generateNotesDraft(output.id).catch((err) => {
     manager.log(`${agent.name} fick ett fel vid Notes-utkast: ${err.message}`);
+    manager.broadcastAgentUpdate(agent);
+  });
+});
+
+// Skapar en riktig videofil (bilder + uppläst text + undertexter via
+// JSON2Video) av en videoidé. Tar en stund - körs i bakgrunden, resultatet
+// strömmar till klienten via socket.io.
+app.post("/api/agents/:id/outputs/:outputId/render-video", (req, res) => {
+  const agent = manager.getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: "Agent hittades inte." });
+
+  const output = agent.outputs.find((o) => o.id === req.params.outputId);
+  if (!output) return res.status(404).json({ error: "Alster hittades inte." });
+  if (output.isVideo) return res.status(400).json({ error: "Videon är redan skapad." });
+  if (!process.env.JSON2VIDEO_API_KEY) {
+    return res.status(400).json({ error: "Ingen JSON2VIDEO_API_KEY satt - kan inte skapa video." });
+  }
+
+  res.json({ ok: true, started: true });
+
+  agent.createVideo(output.id).catch((err) => {
+    manager.log(`${agent.name} fick ett fel vid videoskapande: ${err.message}`);
     manager.broadcastAgentUpdate(agent);
   });
 });
