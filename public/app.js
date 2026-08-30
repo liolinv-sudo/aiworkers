@@ -455,6 +455,28 @@ async function generateNotesDraft(agentId, outputId, btnEl) {
   }
 }
 
+async function renderVideo(agentId, outputId, btnEl) {
+  btnEl.disabled = true;
+  btnEl.textContent = "Skapar video… (kan ta någon minut)";
+  beginAwaitingAction(300000); // upp till 5 minuter för rendering
+  try {
+    const res = await fetch(`/api/agents/${agentId}/outputs/${outputId}/render-video`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Kunde inte skapa video just nu.");
+      btnEl.disabled = false;
+      btnEl.textContent = "🎬 Skapa video";
+      endAwaitingAction();
+    }
+    // Resultatet strömmar in via socket ("agent:update") när det är klart.
+  } catch (err) {
+    alert("Nätverksfel: " + err.message);
+    btnEl.disabled = false;
+    btnEl.textContent = "🎬 Skapa video";
+    endAwaitingAction();
+  }
+}
+
 function copyToClipboard(text, btnEl) {
   navigator.clipboard
     .writeText(text)
@@ -487,6 +509,8 @@ function bindOutputActions(container) {
       btn.addEventListener("click", () => translateOutput(agentId, outputId, btn));
     } else if (btn.classList.contains("btn-notes-draft")) {
       btn.addEventListener("click", () => generateNotesDraft(agentId, outputId, btn));
+    } else if (btn.classList.contains("btn-render-video")) {
+      btn.addEventListener("click", () => renderVideo(agentId, outputId, btn));
     } else if (btn.classList.contains("btn-copy-notes")) {
       btn.addEventListener("click", () => {
         if (output?.notesDraft) copyToClipboard(output.notesDraft, btn);
@@ -670,6 +694,41 @@ function renderOutputItem(o, agentId, showAgentName) {
         <div class="output-item-actions">
           <a class="btn btn-tiny btn-download" href="${o.imageUrl}" target="_blank" rel="noopener">⬇ Öppna bild</a>
           <a class="btn btn-tiny btn-download" href="/api/agents/${agentId}/outputs/${o.id}/pdf">⬇ .pdf</a>
+          ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
+        </div>
+      </article>
+    `;
+  }
+
+  if (o.isVideoIdea || o.isVideo) {
+    const marketplaceLinks = (o.marketplaces || [])
+      .map((m) => `<a href="${m.url}" target="_blank" rel="noopener" class="marketplace-chip">${escapeHtml(m.name)}</a>`)
+      .join("");
+
+    const videoOrButton = o.isVideo
+      ? `<video class="generated-video" src="${o.videoUrl}" controls preload="metadata"></video>
+         <a class="btn btn-tiny btn-download" href="${o.videoUrl}" target="_blank" rel="noopener">⬇ Öppna video</a>`
+      : `<button type="button" class="btn btn-tiny btn-render-video" data-agent-id="${agentId}" data-output-id="${o.id}">🎬 Skapa video</button>`;
+
+    return `
+      <article class="output-item output-item-video">
+        <div class="output-item-head">
+          <h4>🎬 ${renderMarkdownLite(o.title)}</h4>
+          <span class="output-time">${time} ${agentLabel}</span>
+        </div>
+        ${o.subtitle ? `<p class="output-subtitle">${renderMarkdownLite(o.subtitle)}</p>` : ""}
+        <div class="book-meta">
+          ${o.suggestedPriceKr ? `<span class="book-meta-chip book-price">Föreslaget pris: ${o.suggestedPriceKr} kr</span>` : ""}
+          ${o.isVideo ? `<span class="book-meta-chip">✅ Video klar (${o.sceneCount} scener)</span>` : `<span class="book-meta-chip">💡 Idé - ej skapad än</span>`}
+        </div>
+        <p>${renderMarkdownLite(o.body || o.preview)}</p>
+        ${renderTags(o.tags)}
+        <div class="marketplace-row">
+          <span class="marketplace-label">Lämpliga marknader:</span>
+          ${marketplaceLinks || "<span class='bio-note'>Inga förslag</span>"}
+        </div>
+        <div class="output-item-actions">
+          ${videoOrButton}
           ${paymentConfig.paymentLink ? `<a class="btn btn-tiny btn-buy" href="${paymentConfig.paymentLink}" target="_blank" rel="noopener">💳 Köp</a>` : ""}
         </div>
       </article>
@@ -909,6 +968,7 @@ document.getElementById("image-style-confirm").addEventListener("click", () => {
 });
 document.getElementById("spawn-journalist-feature").addEventListener("click", () => spawnAgent("journalist_feature"));
 document.getElementById("spawn-journalist-column").addEventListener("click", () => spawnAgent("journalist_column"));
+document.getElementById("spawn-video").addEventListener("click", () => spawnAgent("video"));
 
 // ---- Globalt bibliotek: sammanställning av ALLA agenters arbete ----
 
@@ -919,6 +979,7 @@ function classifyOutput(o) {
   if (o.isBook) return "book";
   if (o.isArticle) return "article";
   if (o.isImage) return "image";
+  if (o.isVideoIdea || o.isVideo) return "video";
   return "idea";
 }
 

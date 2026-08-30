@@ -1217,6 +1217,19 @@ button:focus-visible, input:focus-visible {
   border-color: var(--violet);
 }
 
+.generated-video {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  margin-bottom: 10px;
+  display: block;
+  background: black;
+}
+
+.output-item-video {
+  border-color: var(--gold);
+}
+
 .lazy-poll-img {
   background: var(--bg-card);
   min-height: 120px;
