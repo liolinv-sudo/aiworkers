@@ -26,8 +26,15 @@ class AgentManager {
   // ---- Agentlivscykel ----
 
   spawnAgent({ parentId = null, kind = "text", genre = null, imageStyle = null } = {}) {
-    if (this.agents.size >= MAX_AGENTS) {
-      throw new Error(`Max antal agenter (${MAX_AGENTS}) uppnått.`);
+    // Dolda (arkiverade) agenter är pausade och gör ingenting - de ska
+    // inte uppta en plats av den aktiva gränsen.
+    const activeCount = [...this.agents.values()].filter((a) => !a.archived).length;
+    if (activeCount >= MAX_AGENTS) {
+      throw new Error(
+        `Max antal AKTIVA agenter (${MAX_AGENTS}) uppnått. Dölj någon ` +
+        `befintlig agent (📥-knappen) för att göra plats - historiken ` +
+        `påverkas inte.`
+      );
     }
     const agent = new Agent({ parentId, manager: this, kind, genre, imageStyle });
     this.agents.set(agent.id, agent);
@@ -133,8 +140,9 @@ class AgentManager {
 
   getStats() {
     const totalCents = this.getTotalEarningsCents();
+    const activeCount = [...this.agents.values()].filter((a) => !a.archived).length;
     return {
-      agentCount: this.agents.size,
+      agentCount: activeCount,
       maxAgents: MAX_AGENTS,
       totalEarningsCents: totalCents,
       dailyGoalCents: DAILY_GOAL_CENTS,

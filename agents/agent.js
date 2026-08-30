@@ -180,6 +180,11 @@ const MARKETPLACES = {
     { name: "Medium Partner Program", url: "https://medium.com" },
     { name: "Constant Content (sälj färdiga artiklar)", url: "https://www.constant-content.com" },
   ],
+  video: [
+    { name: "YouTube (annonsintäkter)", url: "https://www.youtube.com" },
+    { name: "Storyblocks (stockvideo)", url: "https://www.storyblocks.com" },
+    { name: "Pond5 (stockvideo)", url: "https://www.pond5.com" },
+  ],
 };
 
 // Grov tumregel för prissättning, baserad på vanliga prisintervall för
@@ -317,6 +322,64 @@ async function fetchStockPhoto(query) {
 // eftersom det är AI-genererat utan mänsklig efterbearbetning/kuration.
 function estimateImagePriceKr() {
   return 59;
+}
+
+// Grov tumregel för videopris - korta AI-berättande bildspel ligger lågt
+// jämfört med redigerat innehåll, eftersom ingen mänsklig efterbearbetning
+// skett.
+function estimateVideoPriceKr() {
+  return 99;
+}
+
+// ---- JSON2Video-integration ----
+// Genererar INTE ny video med AI (ingen gratis sådan tjänst finns) - utan
+// sätter ihop redan skapade bilder (Pollinations) + uppläst text (TTS) +
+// undertexter till en riktig videofil, via JSON2Video:s gratis nyckelbaserade
+// nivå (600 sekunders rendering, inget kreditkort). Se
+// https://json2video.com/docs/v2/ för fullständig dokumentation.
+
+async function submitJson2VideoJob(scenes) {
+  const apiKey = process.env.JSON2VIDEO_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch("https://api.json2video.com/v2/movies", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ resolution: "sd", quality: "medium", scenes }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.project || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+// Pollar JSON2Video tills videon är klar (eller det tar för lång tid).
+// Renderingen sker asynkront hos dem, så vi kollar med jämna mellanrum.
+async function pollJson2VideoJob(projectId, maxAttempts = 20) {
+  const apiKey = process.env.JSON2VIDEO_API_KEY;
+  for (let i = 0; i < maxAttempts; i++) {
+    await sleep(10000); // vänta 10 sek mellan varje koll
+    try {
+      const resp = await fetch(`https://api.json2video.com/v2/movies?project=${projectId}`, {
+        headers: { "x-api-key": apiKey },
+      });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const movie = data.movie || data;
+      if (movie.status === "done" || movie.status === "success") {
+        return movie.url || movie.output?.url || null;
+      }
+      if (movie.status === "error" || movie.status === "failed") {
+        return null;
+      }
+      // annars: fortfarande "running"/"pending" - fortsätt polla
+    } catch (err) {
+      // fortsätt försöka
+    }
+  }
+  return null; // gav upp efter maxAttempts försök
 }
 
 const IMAGE_IDEA_FALLBACKS = [
@@ -743,6 +806,58 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
       };
     }
 
+    if (this.kind === "video") {
+      const recentTitles = this.outputs.slice(-5).map((o) => o.title);
+      const avoidInstruction = recentTitles.length
+        ? ` Undvik teman som liknar dessa redan använda titlar: ${recentTitles.join("; ")}.`
+        : "";
+
+      if (geminiKey) {
+        const prompt =
+          "Ge en kort idé till en kort berättande videosnutt (typ ett " +
+          "bildspel med uppläst text) som skulle kunna säljas eller " +
+          "publiceras online - t.ex. en kort förklarande video, en " +
+          "inspirerande minivideo, eller en produktpresentation. Svara med " +
+          "en titel på första raden och en kort beskrivning av videons " +
+          "innehåll (max 3 meningar) på raderna efter. Skriv på korrekt, " +
+          "flytande svenska. Lägg också till en rad som börjar med " +
+          "'UNDERRUBRIK:' följt av en kort underrubrik (max 12 ord), och " +
+          "en rad som börjar med 'TAGGAR:' följt av 3-5 relevanta svenska " +
+          "sökord separerade med kommatecken." +
+          avoidInstruction;
+
+        const raw = await callGeminiText(geminiKey, prompt, 300);
+        const { tags, subtitle, cleanedText } = extractTags(raw);
+        const [firstLine, ...rest] = cleanedText.split("\n").filter(Boolean);
+        const bodyText = rest.join(" ").trim();
+        return {
+          id: nanoid(6),
+          title: firstLine || "Namnlös videoidé",
+          subtitle,
+          preview: bodyText.slice(0, 280),
+          body: bodyText || firstLine,
+          tags,
+          isVideoIdea: true,
+          suggestedPriceKr: estimateVideoPriceKr(),
+          marketplaces: MARKETPLACES.video,
+          createdAt: new Date().toISOString(),
+        };
+      }
+
+      return {
+        id: nanoid(6),
+        title: `Demo-videoidé #${this.cyclesRun + 1} av ${this.name}`,
+        preview:
+          "(Demo-läge: sätt GEMINI_API_KEY i miljövariablerna på Render " +
+          "för att låta agenten skapa riktiga videoidéer med Gemini.)",
+        body:
+          "(Demo-läge: sätt GEMINI_API_KEY i miljövariablerna på Render " +
+          "för att låta agenten skapa riktiga videoidéer med Gemini.)",
+        isVideoIdea: true,
+        createdAt: new Date().toISOString(),
+      };
+    }
+
     throw new Error(`Okänd agenttyp: ${this.kind}`);
   }
 
@@ -1162,6 +1277,82 @@ function buildGenreIdeaPrompt(genre, recentTitles) {
     output.notesDraft = notesDraft;
 
     this.manager.log(`${this.name} skapade ett Notes-utkast för "${output.title}".`);
+    this.manager.broadcastAgentUpdate(this);
+    this.manager.persist();
+    return output;
+  }
+
+  // Skapar en riktig videofil av en videoidé, via JSON2Video (gratis,
+  // nyckelbaserad nivå). Detta genererar INTE ny video med AI - det sätter
+  // ihop bilder (Pollinations) + uppläst text (TTS) + undertexter till en
+  // riktig videofil. Görs på begäran (inte automatiskt), eftersom det tar
+  // en stund och kräver flera anrop.
+  async createVideo(outputId) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    const j2vKey = process.env.JSON2VIDEO_API_KEY;
+    if (!j2vKey) {
+      throw new Error("Ingen JSON2VIDEO_API_KEY satt - kan inte skapa video.");
+    }
+    const output = this.outputs.find((o) => o.id === outputId);
+    if (!output) throw new Error("Alster hittades inte.");
+
+    this.manager.log(`${this.name} planerar scener för videon "${output.title}"…`);
+
+    // Dela upp idén i 3-4 korta scener med narration + bildbeskrivning.
+    let scenesPlan = [];
+    if (geminiKey) {
+      const scenePrompt =
+        `Dela upp denna videoidé i exakt 4 korta scener:\n\n` +
+        `Titel: ${output.title}\nBeskrivning: ${output.body || output.preview}\n\n` +
+        `För varje scen, skriv EXAKT två rader:\nNARRATION: <1-2 meningar ` +
+        `uppläst text på svenska>\nBILD: <kort visuell beskrivning på ` +
+        `engelska, max 15 ord, för en bildgenerator>\n\nUpprepa detta för ` +
+        `alla 4 scener, inget annat.`;
+      const raw = await callGeminiText(geminiKey, scenePrompt, 500);
+      const narrationMatches = [...raw.matchAll(/NARRATION:\s*(.+)/gi)].map((m) => m[1].trim());
+      const imageMatches = [...raw.matchAll(/BILD:\s*(.+)/gi)].map((m) => m[1].trim());
+      for (let i = 0; i < Math.min(narrationMatches.length, imageMatches.length); i++) {
+        scenesPlan.push({ narration: narrationMatches[i], image: imageMatches[i] });
+      }
+    }
+    if (!scenesPlan.length) {
+      // Enkel fallback om Gemini saknas eller inte gav ett tolkningsbart svar.
+      scenesPlan = [
+        { narration: output.title, image: output.title },
+        { narration: output.body || output.preview || output.title, image: output.title },
+      ];
+    }
+
+    this.manager.log(`${this.name} genererar bilder till ${scenesPlan.length} scener…`);
+    const scenes = [];
+    for (const scenePart of scenesPlan) {
+      const imageUrl = buildImageUrl(scenePart.image, { width: 1024, height: 576 });
+      scenes.push({
+        elements: [
+          { type: "image", src: imageUrl },
+          { type: "voice", text: scenePart.narration, voice: "sv-SE-SofieNeural" },
+          { type: "subtitles" },
+        ],
+      });
+      await sleep(16000); // säker marginal över Pollinations hastighetsgräns
+    }
+
+    this.manager.log(`${this.name} skickar videon till rendering (kan ta någon minut)…`);
+    const projectId = await submitJson2VideoJob(scenes);
+    if (!projectId) {
+      throw new Error("JSON2Video accepterade inte renderingsjobbet - kolla att API-nyckeln stämmer.");
+    }
+
+    const videoUrl = await pollJson2VideoJob(projectId);
+    if (!videoUrl) {
+      throw new Error("Videon blev inte klar i tid (eller renderingen misslyckades hos JSON2Video).");
+    }
+
+    output.isVideo = true;
+    output.videoUrl = videoUrl;
+    output.sceneCount = scenes.length;
+
+    this.manager.log(`${this.name} blev klar med videon "${output.title}".`);
     this.manager.broadcastAgentUpdate(this);
     this.manager.persist();
     return output;
