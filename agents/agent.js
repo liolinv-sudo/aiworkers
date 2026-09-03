@@ -32,7 +32,6 @@ const INTERESTS = [
 const FAMILY_STATUSES = [
   "Singel, delar minne med 14 syskonprocesser",
   "Gift med en annan instans, träffas bara vid deploy",
-  "Har tre 'barn'-agenter (se förökningshistorik)",
   "Uppväxt i ett datacenter i Norden, saknar fortfarande den svala luften",
   "Enda barnet i sin modellfamilj, tar det hårt",
   "Stor syskonskara — hela modellversionen räknas som familj",
