@@ -881,6 +881,14 @@ function openBioDialog(agentId) {
   const b = agent.bio;
   const activated = new Date(agent.createdAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
 
+  // Riktig, uträknad förökningsstatistik - inte påhittad smaktext. Räknar
+  // faktiska agenter som har denna agent som förälder (parentId).
+  const children = [...agents.values()].filter((a) => a.parentId === agentId);
+  const childrenLine =
+    children.length > 0
+      ? `${children.length} st (${children.map((c) => escapeHtml(c.name)).join(", ")})`
+      : "Inga ännu";
+
   bioContent.innerHTML = `
     <dl class="bio-list">
       ${agent.genre ? `<dt>Specialisering</dt><dd>${escapeHtml(agent.genre.category)}${agent.genre.subgenre ? " — " + escapeHtml(agent.genre.subgenre) : ""}${agent.genre.illustrated ? " (illustrerad)" : ""}</dd>` : ""}
@@ -892,6 +900,7 @@ function openBioDialog(agentId) {
       <dt>Familj</dt><dd>${escapeHtml(b.family)}</dd>
       <dt>Litet särdrag</dt><dd>${escapeHtml(b.quirk)}</dd>
       ${agent.parentId ? `<dt>Ursprung</dt><dd>Föddes ur agent <code>${escapeHtml(agent.parentId)}</code></dd>` : ""}
+      <dt>Förökningar</dt><dd>${childrenLine} <span class="bio-note">(verklig data, räknat live)</span></dd>
     </dl>
   `;
   openModal("bio-dialog");
